@@ -23,7 +23,6 @@ import type { GraphNode, GraphEdge } from "@/types";
 
 type MindNodeData = Record<string, unknown> & {
   label: string;
-  preview: string;
 };
 
 function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
@@ -36,21 +35,15 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
       />
       <div
         className={[
-          "w-52 rounded-xl border px-3.5 py-3",
+          "w-40 rounded-2xl border px-3 py-2.5 text-center",
           selected
-            ? "border-neutral-400 shadow-lg shadow-black/40"
-            : "border-canvas-border",
-          "bg-canvas-surface shadow-sm",
+            ? "border-neutral-600 bg-neutral-800 shadow-lg shadow-black/50"
+            : "border-canvas-border bg-canvas-surface shadow-sm",
         ].join(" ")}
       >
-        <p className="line-clamp-2 text-sm font-medium leading-snug text-neutral-100">
+        <p className="line-clamp-2 text-xs font-medium leading-snug text-neutral-100">
           {data.label}
         </p>
-        {data.preview && (
-          <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-neutral-500">
-            {data.preview}
-          </p>
-        )}
       </div>
       <Handle
         type="source"
@@ -63,20 +56,13 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
 
 const nodeTypes = { mindNode: MindNodeComponent };
 
-function truncatePreview(text: string, maxLen = 110): string {
-  if (text.length <= maxLen) return text;
-  return text.slice(0, maxLen - 1) + "…";
-}
 
 function toFlowNodes(dbNodes: GraphNode[]): Node<MindNodeData>[] {
   return dbNodes.map((n) => ({
     id: n.id,
     type: "mindNode",
     position: { x: n.position_x, y: n.position_y },
-    data: {
-      label: n.title,
-      preview: truncatePreview(n.summary),
-    },
+    data: { label: n.title },
   }));
 }
 

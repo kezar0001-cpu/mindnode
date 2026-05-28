@@ -8,7 +8,7 @@ import {
   initialCreateMemoryEntryState,
 } from "@/lib/memory/types";
 
-export function ThoughtInputForm() {
+export function ThoughtInputForm({ onSuccess }: { onSuccess?: () => void }) {
   const [state, formAction, pending] = useActionState(
     createMemoryEntryAction,
     initialCreateMemoryEntryState,
@@ -18,8 +18,9 @@ export function ThoughtInputForm() {
   useEffect(() => {
     if (state.status === "success") {
       formRef.current?.reset();
+      onSuccess?.();
     }
-  }, [state]);
+  }, [state, onSuccess]);
 
   return (
     <form ref={formRef} action={formAction} className="space-y-3">
