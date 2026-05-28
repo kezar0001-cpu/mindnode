@@ -19,6 +19,7 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { updateNodePositionAction } from "@/lib/graph/actions";
+import { GhostNodeComponent, type GhostNodeData } from "@/components/nodes/ghost-node";
 import type { GraphNode, GraphEdge } from "@/types";
 
 type MindNodeData = Record<string, unknown> & {
@@ -26,6 +27,24 @@ type MindNodeData = Record<string, unknown> & {
   focused?: boolean;
   connected?: boolean;
   dimmed?: boolean;
+};
+
+export type GhostAnchorType = "real_node" | "ghost_node" | "graph";
+
+export type GhostSuggestion = {
+  id: string;
+  title: string;
+  summary: string;
+  category: string;
+  relationship_type: string;
+  reason: string;
+  confidence: number;
+  anchor_type: GhostAnchorType;
+  anchor_node_id?: string;
+  parent_ghost_id?: string;
+  root_node_id?: string;
+  x: number;
+  y: number;
 };
 
 function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
@@ -68,7 +87,7 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
   );
 }
 
-const nodeTypes = { mindNode: MindNodeComponent };
+const nodeTypes = { mindNode: MindNodeComponent, ghostNode: GhostNodeComponent };
 
 function toFlowNodes(dbNodes: GraphNode[]): Node<MindNodeData>[] {
   return dbNodes.map((n) => ({
@@ -84,6 +103,10 @@ type CanvasProps = {
   dbEdges: GraphEdge[];
   selectedNodeId: string | null;
   onNodeSelect: (id: string | null) => void;
+  ghostSuggestions: GhostSuggestion[];
+  onGhostExplore: (id: string) => void;
+  onGhostPin: (id: string) => void;
+  onGhostDismiss: (id: string) => void;
 };
 
 export function Canvas({
@@ -91,11 +114,16 @@ export function Canvas({
   dbEdges,
   selectedNodeId,
   onNodeSelect,
+  ghostSuggestions,
+  onGhostExplore,
+  onGhostPin,
+  onGhostDismiss,
 }: CanvasProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState(toFlowNodes(dbNodes));
+  const [nodes, setNodes, onNodesChange] = useNodesState<
+    Node<MindNodeData> | Node<GhostNodeData>
+  >(toFlowNodes(dbNodes));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
-  // Compute connected IDs based on current selection.
   const connectedIds = useMemo<Set<string>>(() => {
     if (!selectedNodeId) return new Set();
     const s = new Set<string>();
@@ -106,7 +134,6 @@ export function Canvas({
     return s;
   }, [dbEdges, selectedNodeId]);
 
-  // Styled edges depend on selection. Re-derive when either changes.
   const styledEdges = useMemo<Edge[]>(() => {
     return dbEdges.map((e) => {
       const touchesSelected =
@@ -135,46 +162,102 @@ export function Canvas({
     });
   }, [dbEdges, selectedNodeId]);
 
-  useEffect(() => {
-    setEdges(styledEdges);
-  }, [styledEdges, setEdges]);
+  const ghostFlowNodes = useMemo<Node<GhostNodeData>[]>(() => {
+    return ghostSuggestions.map((g) => ({
+      id: g.id,
+      type: "ghostNode",
+      position: { x: g.x, y: g.y },
+      draggable: false,
+      data: {
+        title: g.title,
+        category: g.category,
+        reason: g.reason,
+        onExplore: () => onGhostExplore(g.id),
+        onPin: () => onGhostPin(g.id),
+        onDismiss: () => onGhostDismiss(g.id),
+      },
+    }));
+  }, [ghostSuggestions, onGhostExplore, onGhostPin, onGhostDismiss]);
 
-  // When dbNodes gains new IDs (after a node is created), add them to the
-  // canvas without disturbing existing nodes' position/selection state.
+  const ghostStyledEdges = useMemo<Edge[]>(() => {
+    const realNodeIds = new Set(dbNodes.map((n) => n.id));
+    const ghostIds = new Set(ghostSuggestions.map((g) => g.id));
+    const out: Edge[] = [];
+    for (const g of ghostSuggestions) {
+      let source: string | undefined;
+      if (g.anchor_type === "real_node" && g.anchor_node_id) {
+        if (realNodeIds.has(g.anchor_node_id)) source = g.anchor_node_id;
+      } else if (g.anchor_type === "ghost_node" && g.parent_ghost_id) {
+        if (ghostIds.has(g.parent_ghost_id)) source = g.parent_ghost_id;
+      }
+      if (!source) continue;
+      out.push({
+        id: `ghost-edge-${g.id}`,
+        source,
+        target: g.id,
+        type: "default",
+        animated: false,
+        style: {
+          stroke: "#a78bfa",
+          strokeWidth: 1,
+          strokeDasharray: "4 4",
+          opacity: 0.7,
+        },
+      });
+    }
+    return out;
+  }, [ghostSuggestions, dbNodes]);
+
+  const allEdges = useMemo<Edge[]>(
+    () => [...styledEdges, ...ghostStyledEdges],
+    [styledEdges, ghostStyledEdges],
+  );
+
+  useEffect(() => {
+    setEdges(allEdges);
+  }, [allEdges, setEdges]);
+
+  // Merge new real nodes; preserve existing positions and selection.
   useEffect(() => {
     setNodes((prev) => {
-      const prevIds = new Set(prev.map((n) => n.id));
-      const incoming = toFlowNodes(dbNodes).filter((n) => !prevIds.has(n.id));
+      const prevRealIds = new Set(
+        prev.filter((n) => n.type !== "ghostNode").map((n) => n.id),
+      );
+      const incoming = toFlowNodes(dbNodes).filter((n) => !prevRealIds.has(n.id));
       return incoming.length === 0 ? prev : [...prev, ...incoming];
     });
   }, [dbNodes, setNodes]);
 
-  // Re-apply focus/connected/dimmed flags whenever selection or edges change.
+  // Sync ghost nodes — replace any existing ghosts wholesale.
+  useEffect(() => {
+    setNodes((prev) => {
+      const realNodes = prev.filter((n) => n.type !== "ghostNode");
+      return [...realNodes, ...ghostFlowNodes];
+    });
+  }, [ghostFlowNodes, setNodes]);
+
+  // Focus / connected / dimmed flags on real nodes only.
   useEffect(() => {
     setNodes((prev) =>
-      prev.map((n) => {
-        const focused = n.id === selectedNodeId;
-        const connected = connectedIds.has(n.id);
+      prev.map((n): Node<MindNodeData> | Node<GhostNodeData> => {
+        if (n.type === "ghostNode") return n;
+        const real = n as Node<MindNodeData>;
+        const focused = real.id === selectedNodeId;
+        const connected = connectedIds.has(real.id);
         const dimmed = selectedNodeId !== null && !focused && !connected;
-        return {
-          ...n,
-          data: { ...n.data, focused, connected, dimmed },
-        };
+        return { ...real, data: { ...real.data, focused, connected, dimmed } };
       }),
     );
   }, [selectedNodeId, connectedIds, setNodes]);
 
-  const onNodeDragStop: OnNodeDrag = useCallback(
-    (_event, node) => {
-      updateNodePositionAction(node.id, node.position.x, node.position.y).catch(
-        console.error,
-      );
-    },
-    [],
-  );
+  const onNodeDragStop: OnNodeDrag = useCallback((_event, node) => {
+    if (node.type === "ghostNode") return;
+    updateNodePositionAction(node.id, node.position.x, node.position.y).catch(console.error);
+  }, []);
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
+      if (node.type === "ghostNode") return;
       onNodeSelect(node.id);
     },
     [onNodeSelect],
@@ -184,7 +267,7 @@ export function Canvas({
     onNodeSelect(null);
   }, [onNodeSelect]);
 
-  if (nodes.length === 0) {
+  if (dbNodes.length === 0 && ghostSuggestions.length === 0) {
     return (
       <div className="flex h-full items-center justify-center p-6">
         <p className="text-center text-sm leading-relaxed text-neutral-500">

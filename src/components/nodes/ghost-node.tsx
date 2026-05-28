@@ -1,0 +1,64 @@
+"use client";
+
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
+
+export type GhostNodeData = Record<string, unknown> & {
+  title: string;
+  category: string;
+  reason: string;
+  onExplore: () => void;
+  onPin: () => void;
+  onDismiss: () => void;
+};
+
+export function GhostNodeComponent({ data, selected }: NodeProps<Node<GhostNodeData>>) {
+  return (
+    <>
+      <Handle type="target" position={Position.Left} style={{ opacity: 0, width: 6, height: 6, border: "none" }} />
+      <div
+        className={[
+          "w-44 rounded-2xl border-2 border-dashed px-3 py-2.5 text-center transition-all",
+          selected
+            ? "border-purple-300 bg-purple-950/40 shadow-lg shadow-purple-500/20"
+            : "border-purple-400/60 bg-purple-950/20 opacity-90",
+        ].join(" ")}
+      >
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-purple-300/80">
+          AI · {data.category}
+        </p>
+        <p className="line-clamp-2 text-xs font-medium leading-snug text-purple-100">
+          {data.title}
+        </p>
+        {selected && (
+          <div className="mt-2 flex justify-center gap-1.5">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); data.onExplore(); }}
+              className="rounded-full bg-purple-300 px-2 py-0.5 text-[10px] font-medium text-purple-950 hover:bg-purple-200"
+            >
+              Explore
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); data.onPin(); }}
+              className="rounded-full bg-teal-300 px-2 py-0.5 text-[10px] font-medium text-canvas-bg hover:bg-teal-200"
+            >
+              Pin
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); data.onDismiss(); }}
+              aria-label="Dismiss"
+              className="flex h-5 w-5 items-center justify-center rounded-full bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+            >
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        )}
+      </div>
+      <Handle type="source" position={Position.Right} style={{ opacity: 0, width: 6, height: 6, border: "none" }} />
+    </>
+  );
+}
