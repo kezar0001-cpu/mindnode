@@ -105,3 +105,59 @@ export async function createNodeFromMemoryAction(
   revalidatePath("/");
   return { success: true };
 }
+
+export async function createEdgeAction(
+  sourceNodeId: string,
+  targetNodeId: string,
+  relationshipType: string,
+): Promise<{ success: boolean; error?: string }> {
+  const user = await requireUser();
+
+  if (sourceNodeId === targetNodeId) {
+    return { success: false, error: "A thought cannot connect to itself." };
+  }
+
+  const trimmedType = relationshipType.trim() || "related";
+
+  const supabase = await createSupabaseServerClient();
+
+  // Verify both nodes belong to this user (RLS would block anyway, but
+  // a friendly error is better than a silent insert failure).
+  const { data: ownedNodes, error: ownedError } = await supabase
+    .from("nodes")
+    .select("id")
+    .in("id", [sourceNodeId, targetNodeId])
+    .eq("user_id", user.id);
+
+  if (ownedError || !ownedNodes || ownedNodes.length !== 2) {
+    return { success: false, error: "One of those thoughts wasn't found." };
+  }
+
+  // Duplicate check — same source, target, and type.
+  const { data: existing } = await supabase
+    .from("edges")
+    .select("id")
+    .eq("source_node_id", sourceNodeId)
+    .eq("target_node_id", targetNodeId)
+    .eq("relationship_type", trimmedType)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (existing) {
+    return { success: false, error: "These thoughts are already connected." };
+  }
+
+  const { error: insertError } = await supabase.from("edges").insert({
+    user_id: user.id,
+    source_node_id: sourceNodeId,
+    target_node_id: targetNodeId,
+    relationship_type: trimmedType,
+  });
+
+  if (insertError) {
+    return { success: false, error: "Could not create connection. Please try again." };
+  }
+
+  revalidatePath("/");
+  return { success: true };
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   ReactFlow,
   Background,
@@ -23,9 +23,15 @@ import type { GraphNode, GraphEdge } from "@/types";
 
 type MindNodeData = Record<string, unknown> & {
   label: string;
+  focused?: boolean;
+  connected?: boolean;
+  dimmed?: boolean;
 };
 
 function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
+  const focused = data.focused || selected;
+  const connected = data.connected;
+  const dimmed = data.dimmed;
   return (
     <>
       <Handle
@@ -35,13 +41,21 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
       />
       <div
         className={[
-          "w-40 rounded-2xl border px-3 py-2.5 text-center",
-          selected
-            ? "border-neutral-600 bg-neutral-800 shadow-lg shadow-black/50"
+          "w-40 rounded-2xl border px-3 py-2.5 text-center transition-all duration-200",
+          focused
+            ? "border-teal-300 bg-neutral-800 shadow-lg shadow-teal-500/20 scale-105"
+            : connected
+            ? "border-teal-300/40 bg-canvas-surface shadow-md shadow-teal-500/10"
             : "border-canvas-border bg-canvas-surface shadow-sm",
+          dimmed ? "opacity-50" : "opacity-100",
         ].join(" ")}
       >
-        <p className="line-clamp-2 text-xs font-medium leading-snug text-neutral-100">
+        <p
+          className={[
+            "line-clamp-2 text-xs font-medium leading-snug",
+            focused ? "text-white" : "text-neutral-100",
+          ].join(" ")}
+        >
           {data.label}
         </p>
       </div>
@@ -56,24 +70,12 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
 
 const nodeTypes = { mindNode: MindNodeComponent };
 
-
 function toFlowNodes(dbNodes: GraphNode[]): Node<MindNodeData>[] {
   return dbNodes.map((n) => ({
     id: n.id,
     type: "mindNode",
     position: { x: n.position_x, y: n.position_y },
     data: { label: n.title },
-  }));
-}
-
-function toFlowEdges(dbEdges: GraphEdge[]): Edge[] {
-  return dbEdges.map((e) => ({
-    id: e.id,
-    source: e.source_node_id,
-    target: e.target_node_id,
-    label: e.label ?? e.relationship_type,
-    style: { stroke: "#262a33" },
-    labelStyle: { fill: "#9ca3af", fontSize: 11 },
   }));
 }
 
@@ -90,10 +92,52 @@ export function Canvas({
   selectedNodeId,
   onNodeSelect,
 }: CanvasProps) {
-  // Pass computed values directly; useNodesState/useEdgesState only read
-  // their argument during the initial render.
   const [nodes, setNodes, onNodesChange] = useNodesState(toFlowNodes(dbNodes));
-  const [edges, setEdges, onEdgesChange] = useEdgesState(toFlowEdges(dbEdges));
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  // Compute connected IDs based on current selection.
+  const connectedIds = useMemo<Set<string>>(() => {
+    if (!selectedNodeId) return new Set();
+    const s = new Set<string>();
+    for (const e of dbEdges) {
+      if (e.source_node_id === selectedNodeId) s.add(e.target_node_id);
+      if (e.target_node_id === selectedNodeId) s.add(e.source_node_id);
+    }
+    return s;
+  }, [dbEdges, selectedNodeId]);
+
+  // Styled edges depend on selection. Re-derive when either changes.
+  const styledEdges = useMemo<Edge[]>(() => {
+    return dbEdges.map((e) => {
+      const touchesSelected =
+        selectedNodeId !== null &&
+        (e.source_node_id === selectedNodeId || e.target_node_id === selectedNodeId);
+      const dimmed = selectedNodeId !== null && !touchesSelected;
+      return {
+        id: e.id,
+        source: e.source_node_id,
+        target: e.target_node_id,
+        label: e.label ?? e.relationship_type,
+        type: "default",
+        animated: touchesSelected,
+        style: {
+          stroke: touchesSelected ? "#5eead4" : "#3a3f4b",
+          strokeWidth: touchesSelected ? 2 : 1,
+          opacity: dimmed ? 0.25 : 1,
+        },
+        labelStyle: {
+          fill: touchesSelected ? "#5eead4" : "#6b7280",
+          fontSize: 11,
+          opacity: dimmed ? 0.4 : 1,
+        },
+        labelBgStyle: { fill: "#0f1115" },
+      };
+    });
+  }, [dbEdges, selectedNodeId]);
+
+  useEffect(() => {
+    setEdges(styledEdges);
+  }, [styledEdges, setEdges]);
 
   // When dbNodes gains new IDs (after a node is created), add them to the
   // canvas without disturbing existing nodes' position/selection state.
@@ -105,10 +149,20 @@ export function Canvas({
     });
   }, [dbNodes, setNodes]);
 
-  // Mirror edge list when it changes.
+  // Re-apply focus/connected/dimmed flags whenever selection or edges change.
   useEffect(() => {
-    setEdges(toFlowEdges(dbEdges));
-  }, [dbEdges, setEdges]);
+    setNodes((prev) =>
+      prev.map((n) => {
+        const focused = n.id === selectedNodeId;
+        const connected = connectedIds.has(n.id);
+        const dimmed = selectedNodeId !== null && !focused && !connected;
+        return {
+          ...n,
+          data: { ...n.data, focused, connected, dimmed },
+        };
+      }),
+    );
+  }, [selectedNodeId, connectedIds, setNodes]);
 
   const onNodeDragStop: OnNodeDrag = useCallback(
     (_event, node) => {
@@ -156,7 +210,6 @@ export function Canvas({
       fitViewOptions={{ padding: 0.25 }}
       minZoom={0.2}
       maxZoom={2.5}
-      // Re-enable when edge creation UI lands.
       nodesConnectable={false}
       connectOnClick={false}
       className="bg-canvas-bg"
