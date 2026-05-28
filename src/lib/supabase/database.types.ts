@@ -3,11 +3,6 @@
 // Regenerate later via `supabase gen types typescript --linked`
 // once the schema stops moving.
 
-import type {
-  AISuggestionPayload,
-  AISuggestionStatus,
-} from "@/types";
-
 type Json =
   | string
   | number
@@ -153,8 +148,10 @@ export interface Database {
           id: string;
           user_id: string;
           memory_entry_id: string;
-          suggestion_json: AISuggestionPayload;
-          status: AISuggestionStatus;
+          // Parsed via Zod at read time; DB enforces no schema at this layer.
+          suggestion_json: Json;
+          // "pending" | "accepted" | "rejected" — enforced by DB CHECK constraint.
+          status: string;
           created_at: string;
           accepted_at: string | null;
         };
@@ -162,8 +159,8 @@ export interface Database {
           id?: string;
           user_id: string;
           memory_entry_id: string;
-          suggestion_json: AISuggestionPayload;
-          status?: AISuggestionStatus;
+          suggestion_json: Json;
+          status?: string;
           created_at?: string;
           accepted_at?: string | null;
         };
@@ -171,8 +168,8 @@ export interface Database {
           id?: string;
           user_id?: string;
           memory_entry_id?: string;
-          suggestion_json?: AISuggestionPayload;
-          status?: AISuggestionStatus;
+          suggestion_json?: Json;
+          status?: string;
           created_at?: string;
           accepted_at?: string | null;
         };

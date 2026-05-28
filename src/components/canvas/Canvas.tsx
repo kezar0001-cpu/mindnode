@@ -160,6 +160,9 @@ export function Canvas({
       fitViewOptions={{ padding: 0.25 }}
       minZoom={0.2}
       maxZoom={2.5}
+      // Re-enable when edge creation UI lands.
+      nodesConnectable={false}
+      connectOnClick={false}
       className="bg-canvas-bg"
     >
       <Background
