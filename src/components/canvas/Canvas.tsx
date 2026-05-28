@@ -19,19 +19,23 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { updateNodePositionAction } from "@/lib/graph/actions";
-import type { GraphNode, GraphEdge } from "@/types";
+import type { GraphNode, GraphEdge, GhostSuggestionNode } from "@/types";
 
 type MindNodeData = Record<string, unknown> & {
   label: string;
   focused?: boolean;
   connected?: boolean;
   dimmed?: boolean;
+  ghost?: boolean;
+  category?: string;
 };
 
 function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
   const focused = data.focused || selected;
   const connected = data.connected;
   const dimmed = data.dimmed;
+  const ghost = data.ghost;
+
   return (
     <>
       <Handle
@@ -42,18 +46,25 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
       <div
         className={[
           "w-40 rounded-2xl border px-3 py-2.5 text-center transition-all duration-200",
-          focused
+          ghost
+            ? "border-dashed border-violet-300/70 bg-violet-950/30 shadow-lg shadow-violet-500/20"
+            : focused
             ? "border-teal-300 bg-neutral-800 shadow-lg shadow-teal-500/20 scale-105"
             : connected
             ? "border-teal-300/40 bg-canvas-surface shadow-md shadow-teal-500/10"
             : "border-canvas-border bg-canvas-surface shadow-sm",
-          dimmed ? "opacity-50" : "opacity-100",
+          dimmed && !ghost ? "opacity-50" : "opacity-100",
         ].join(" ")}
       >
+        {ghost && (
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-violet-200">
+            AI avenue
+          </p>
+        )}
         <p
           className={[
             "line-clamp-2 text-xs font-medium leading-snug",
-            focused ? "text-white" : "text-neutral-100",
+            focused || ghost ? "text-white" : "text-neutral-100",
           ].join(" ")}
         >
           {data.label}
@@ -75,25 +86,45 @@ function toFlowNodes(dbNodes: GraphNode[]): Node<MindNodeData>[] {
     id: n.id,
     type: "mindNode",
     position: { x: n.position_x, y: n.position_y },
-    data: { label: n.title },
+    data: { label: n.title, category: n.category },
+  }));
+}
+
+function toGhostFlowNodes(ghostNodes: GhostSuggestionNode[]): Node<MindNodeData>[] {
+  return ghostNodes.map((ghost) => ({
+    id: ghost.id,
+    type: "mindNode",
+    position: ghost.position,
+    data: { label: ghost.title, category: ghost.category, ghost: true },
   }));
 }
 
 type CanvasProps = {
   dbNodes: GraphNode[];
   dbEdges: GraphEdge[];
+  ghostNodes: GhostSuggestionNode[];
   selectedNodeId: string | null;
+  selectedGhostId: string | null;
   onNodeSelect: (id: string | null) => void;
+  onGhostSelect: (id: string) => void;
 };
 
 export function Canvas({
   dbNodes,
   dbEdges,
+  ghostNodes,
   selectedNodeId,
+  selectedGhostId,
   onNodeSelect,
+  onGhostSelect,
 }: CanvasProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState(toFlowNodes(dbNodes));
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<MindNodeData>>([
+    ...toFlowNodes(dbNodes),
+    ...toGhostFlowNodes(ghostNodes),
+  ]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  const ghostIds = useMemo(() => new Set(ghostNodes.map((ghost) => ghost.id)), [ghostNodes]);
 
   // Compute connected IDs based on current selection.
   const connectedIds = useMemo<Set<string>>(() => {
@@ -118,7 +149,7 @@ export function Canvas({
         source: e.source_node_id,
         target: e.target_node_id,
         label: e.label ?? e.relationship_type,
-        type: "default",
+        type: "smoothstep",
         animated: touchesSelected,
         style: {
           stroke: touchesSelected ? "#5eead4" : "#3a3f4b",
@@ -139,45 +170,59 @@ export function Canvas({
     setEdges(styledEdges);
   }, [styledEdges, setEdges]);
 
-  // When dbNodes gains new IDs (after a node is created), add them to the
-  // canvas without disturbing existing nodes' position/selection state.
+  // Reconcile real and ghost nodes while preserving any local drag positions.
   useEffect(() => {
+    const incoming = [...toFlowNodes(dbNodes), ...toGhostFlowNodes(ghostNodes)];
+    const incomingIds = new Set(incoming.map((node) => node.id));
+
     setNodes((prev) => {
-      const prevIds = new Set(prev.map((n) => n.id));
-      const incoming = toFlowNodes(dbNodes).filter((n) => !prevIds.has(n.id));
-      return incoming.length === 0 ? prev : [...prev, ...incoming];
+      const previousById = new Map(prev.map((node) => [node.id, node]));
+      return incoming.map((node) => {
+        const previous = previousById.get(node.id);
+        return {
+          ...node,
+          position: previous?.position ?? node.position,
+          selected: previous?.selected,
+        };
+      }).filter((node) => incomingIds.has(node.id));
     });
-  }, [dbNodes, setNodes]);
+  }, [dbNodes, ghostNodes, setNodes]);
 
   // Re-apply focus/connected/dimmed flags whenever selection or edges change.
   useEffect(() => {
     setNodes((prev) =>
       prev.map((n) => {
-        const focused = n.id === selectedNodeId;
-        const connected = connectedIds.has(n.id);
-        const dimmed = selectedNodeId !== null && !focused && !connected;
+        const isGhost = ghostIds.has(n.id);
+        const focused = n.id === selectedNodeId || n.id === selectedGhostId;
+        const connected = !isGhost && connectedIds.has(n.id);
+        const dimmed = selectedNodeId !== null && !focused && !connected && !isGhost;
         return {
           ...n,
-          data: { ...n.data, focused, connected, dimmed },
+          data: { ...n.data, focused, connected, dimmed, ghost: isGhost },
         };
       }),
     );
-  }, [selectedNodeId, connectedIds, setNodes]);
+  }, [selectedNodeId, selectedGhostId, connectedIds, ghostIds, setNodes]);
 
   const onNodeDragStop: OnNodeDrag = useCallback(
     (_event, node) => {
+      if (ghostIds.has(node.id)) return;
       updateNodePositionAction(node.id, node.position.x, node.position.y).catch(
         console.error,
       );
     },
-    [],
+    [ghostIds],
   );
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
+      if (ghostIds.has(node.id)) {
+        onGhostSelect(node.id);
+        return;
+      }
       onNodeSelect(node.id);
     },
-    [onNodeSelect],
+    [ghostIds, onGhostSelect, onNodeSelect],
   );
 
   const onPaneClick = useCallback(() => {

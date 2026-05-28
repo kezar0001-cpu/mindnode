@@ -103,7 +103,7 @@ export function NodeDetail({
       )}
 
       {/* Memory trail — raw entries that built this node */}
-      {trail.length > 0 && (
+      {trail.length > 0 ? (
         <div>
           <p className="mb-2 text-xs font-medium uppercase tracking-wider text-neutral-600">
             {trail.length === 1 ? "1 memory" : `${trail.length} memories`}
@@ -123,6 +123,12 @@ export function NodeDetail({
               </li>
             ))}
           </ul>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-violet-300/30 bg-violet-950/10 p-3">
+          <p className="text-xs leading-relaxed text-violet-100/80">
+            Created from an AI exploration suggestion. No source memory attached yet.
+          </p>
         </div>
       )}
 

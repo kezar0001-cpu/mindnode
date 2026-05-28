@@ -5,6 +5,61 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
+
+type PinGhostSuggestionInput = {
+  title: string;
+  summary: string;
+  category?: string;
+  source_node_id?: string;
+  relationship_type?: string;
+};
+
+const STOP_WORDS = new Set([
+  "about",
+  "after",
+  "again",
+  "also",
+  "because",
+  "being",
+  "could",
+  "from",
+  "have",
+  "into",
+  "just",
+  "like",
+  "more",
+  "need",
+  "that",
+  "their",
+  "there",
+  "this",
+  "want",
+  "what",
+  "when",
+  "where",
+  "with",
+  "would",
+  "your",
+]);
+
+function extractKeywords(text: string): Set<string> {
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 4 && !STOP_WORDS.has(word));
+  return new Set(words);
+}
+
+function scoreKeywordOverlap(source: Set<string>, target: Set<string>): number {
+  let score = 0;
+  for (const word of source) {
+    if (target.has(word)) score += 1;
+  }
+  return score;
+}
+
 export async function updateNodePositionAction(
   id: string,
   x: number,
@@ -66,6 +121,12 @@ export async function createNodeFromMemoryAction(
     return { success: false, error: "already_on_canvas" };
   }
 
+  const { data: existingNodes } = await supabase
+    .from("nodes")
+    .select("id, title, summary, category")
+    .eq("user_id", user.id)
+    .limit(40);
+
   // Scatter new nodes within a 400×300 window centred at the origin.
   const position_x = (Math.random() - 0.5) * 400;
   const position_y = (Math.random() - 0.5) * 300;
@@ -100,6 +161,40 @@ export async function createNodeFromMemoryAction(
       success: false,
       error: "Could not link memory to node. Please try again.",
     };
+  }
+
+  const memoryKeywords = extractKeywords(memoryEntry.content);
+  const relatedNodes = ((existingNodes ?? []) as Array<{
+    id: string;
+    title: string;
+    summary: string;
+    category: string;
+  }>)
+    .map((candidate) => ({
+      id: candidate.id,
+      score: scoreKeywordOverlap(
+        memoryKeywords,
+        extractKeywords(`${candidate.title} ${candidate.summary} ${candidate.category}`),
+      ),
+    }))
+    .filter((candidate) => candidate.score >= 2)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 2);
+
+  if (relatedNodes.length > 0) {
+    const { error: edgeError } = await supabase.from("edges").insert(
+      relatedNodes.map((related) => ({
+        user_id: user.id,
+        source_node_id: node.id,
+        target_node_id: related.id,
+        relationship_type: "related",
+      })),
+    );
+
+    if (edgeError) {
+      // Auto-connect is helpful, not required. Keep the promoted thought.
+      console.error("Failed to auto-connect related manual thought:", edgeError.message);
+    }
   }
 
   revalidatePath("/");
@@ -156,6 +251,81 @@ export async function createEdgeAction(
 
   if (insertError) {
     return { success: false, error: "Could not create connection. Please try again." };
+  }
+
+  revalidatePath("/");
+  return { success: true };
+}
+
+
+export async function pinGhostSuggestionAction(
+  input: PinGhostSuggestionInput,
+): Promise<{ success: boolean; error?: string }> {
+  const user = await requireUser();
+  const title = input.title.trim();
+  const summary = input.summary.trim();
+  const category = input.category?.trim() || "ai exploration";
+  const relationshipType = input.relationship_type?.trim() || "related";
+
+  if (!title || !summary) {
+    return { success: false, error: "Ghost suggestion needs a title and summary." };
+  }
+
+  const supabase = await createSupabaseServerClient();
+
+  if (input.source_node_id) {
+    const { data: sourceNode, error: sourceError } = await supabase
+      .from("nodes")
+      .select("id")
+      .eq("id", input.source_node_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (sourceError || !sourceNode) {
+      return { success: false, error: "Source thought was not found." };
+    }
+  }
+
+  const { data: node, error: nodeError } = await supabase
+    .from("nodes")
+    .insert({
+      user_id: user.id,
+      title,
+      summary,
+      category,
+      position_x: (Math.random() - 0.5) * 360,
+      position_y: (Math.random() - 0.5) * 260,
+    })
+    .select("id")
+    .single();
+
+  if (nodeError || !node) {
+    return { success: false, error: "Could not pin suggestion to the canvas." };
+  }
+
+  if (input.source_node_id && input.source_node_id !== node.id) {
+    const { data: existing } = await supabase
+      .from("edges")
+      .select("id")
+      .eq("source_node_id", input.source_node_id)
+      .eq("target_node_id", node.id)
+      .eq("relationship_type", relationshipType)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!existing) {
+      const { error: edgeError } = await supabase.from("edges").insert({
+        user_id: user.id,
+        source_node_id: input.source_node_id,
+        target_node_id: node.id,
+        relationship_type: relationshipType,
+      });
+
+      if (edgeError) {
+        await supabase.from("nodes").delete().eq("id", node.id).eq("user_id", user.id);
+        return { success: false, error: "Could not connect pinned suggestion." };
+      }
+    }
   }
 
   revalidatePath("/");
