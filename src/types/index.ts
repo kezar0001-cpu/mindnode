@@ -86,3 +86,19 @@ export interface AISuggestion {
   created_at: ISODateString;
   accepted_at: ISODateString | null;
 }
+
+
+export interface GhostSuggestionNode {
+  id: UUID;
+  title: string;
+  summary: string;
+  category: string;
+  relationship_type: string;
+  reason: string;
+  confidence: number;
+  source_node_id?: UUID;
+  position: {
+    x: number;
+    y: number;
+  };
+}
