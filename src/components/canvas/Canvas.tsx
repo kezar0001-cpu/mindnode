@@ -23,7 +23,7 @@ import type { GraphNode, GraphEdge } from "@/types";
 
 type MindNodeData = Record<string, unknown> & {
   label: string;
-  category: string;
+  preview: string;
 };
 
 function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
@@ -36,17 +36,19 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
       />
       <div
         className={[
-          "min-w-24 max-w-44 rounded border px-3 py-2",
-          selected ? "border-neutral-400" : "border-canvas-border",
+          "w-52 rounded-xl border px-3.5 py-3",
+          selected
+            ? "border-neutral-400 shadow-lg shadow-black/40"
+            : "border-canvas-border",
           "bg-canvas-surface shadow-sm",
         ].join(" ")}
       >
-        <p className="truncate text-sm font-medium text-neutral-100">
+        <p className="line-clamp-2 text-sm font-medium leading-snug text-neutral-100">
           {data.label}
         </p>
-        {data.category && data.category !== "general" && (
-          <p className="mt-0.5 truncate text-xs text-neutral-500">
-            {data.category}
+        {data.preview && (
+          <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-neutral-500">
+            {data.preview}
           </p>
         )}
       </div>
@@ -61,12 +63,20 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
 
 const nodeTypes = { mindNode: MindNodeComponent };
 
+function truncatePreview(text: string, maxLen = 110): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen - 1) + "…";
+}
+
 function toFlowNodes(dbNodes: GraphNode[]): Node<MindNodeData>[] {
   return dbNodes.map((n) => ({
     id: n.id,
     type: "mindNode",
     position: { x: n.position_x, y: n.position_y },
-    data: { label: n.title, category: n.category },
+    data: {
+      label: n.title,
+      preview: truncatePreview(n.summary),
+    },
   }));
 }
 
@@ -160,6 +170,9 @@ export function Canvas({
       fitViewOptions={{ padding: 0.25 }}
       minZoom={0.2}
       maxZoom={2.5}
+      // Re-enable when edge creation UI lands.
+      nodesConnectable={false}
+      connectOnClick={false}
       className="bg-canvas-bg"
     >
       <Background
