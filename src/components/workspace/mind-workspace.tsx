@@ -214,7 +214,11 @@ export function MindWorkspace({
         <NodeDetail
           selectedNodeId={selectedNodeId}
           nodes={initialNodes}
+          edges={initialEdges}
           memoryTrails={memoryTrails}
+          onSelectNode={(id) => {
+            setSelectedNodeId(id);
+          }}
         />
       </BottomSheet>
     </div>
