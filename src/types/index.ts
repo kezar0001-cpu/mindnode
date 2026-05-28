@@ -1,7 +1,10 @@
-// Placeholder domain types for the MindNode MVP.
-// Shape mirrors docs/DATA_MODEL.md and docs/AI_BEHAVIOUR.md.
-// These are not yet wired to Supabase — runtime validation (Zod)
-// will be added alongside the AI suggestion route in Stage 4.
+// Domain types for the MindNode MVP.
+// Shapes mirror the columns created in
+// supabase/migrations/20260528000000_initial_schema.sql and the AI
+// suggestion contract in docs/AI_BEHAVIOUR.md.
+//
+// Runtime validation (Zod) for AI output will be added with the
+// suggestion route in Stage 4.
 
 export type UUID = string;
 
@@ -9,15 +12,14 @@ export type ISODateString = string;
 
 export interface MemoryEntry {
   id: UUID;
-  user_id: UUID;
   content: string;
-  source: "chat";
+  source: string;
+  metadata: Record<string, unknown>;
   created_at: ISODateString;
 }
 
 export interface GraphNode {
   id: UUID;
-  user_id: UUID;
   title: string;
   summary: string;
   category: string;
@@ -29,10 +31,11 @@ export interface GraphNode {
 
 export interface GraphEdge {
   id: UUID;
-  user_id: UUID;
-  source_id: UUID;
-  target_id: UUID;
-  relation: string;
+  source_node_id: UUID;
+  target_node_id: UUID;
+  relationship_type: string;
+  label: string | null;
+  strength: number;
   created_at: ISODateString;
 }
 
@@ -57,6 +60,8 @@ export interface AISuggestedEdge {
   relation: string;
 }
 
+// The structured payload returned by the AI provider. Stored verbatim
+// in ai_suggestions.suggestion_json.
 export interface AISuggestionPayload {
   action: AISuggestionAction;
   title: string;
@@ -70,11 +75,9 @@ export interface AISuggestionPayload {
 
 export interface AISuggestion {
   id: UUID;
-  user_id: UUID;
   memory_entry_id: UUID;
-  action: AISuggestionAction;
-  payload: AISuggestionPayload;
+  suggestion_json: AISuggestionPayload;
   status: AISuggestionStatus;
   created_at: ISODateString;
-  resolved_at: ISODateString | null;
+  accepted_at: ISODateString | null;
 }
