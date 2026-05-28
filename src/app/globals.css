@@ -10,3 +10,24 @@ body {
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* React Flow dark overrides */
+.react-flow__controls {
+  background: #15181f !important;
+  border: 1px solid #262a33 !important;
+  border-radius: 6px !important;
+}
+.react-flow__controls-button {
+  background: #15181f !important;
+  border-bottom: 1px solid #262a33 !important;
+  fill: #9ca3af !important;
+}
+.react-flow__controls-button:hover {
+  background: #1e2229 !important;
+}
+.react-flow__attribution {
+  background: transparent !important;
+}
+.react-flow__attribution a {
+  color: #4b5563 !important;
+}
