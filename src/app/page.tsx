@@ -1,6 +1,12 @@
 import { RecentThoughtsList } from "@/components/input/recent-thoughts-list";
 import { ThoughtInputForm } from "@/components/input/thought-input-form";
+import { MindWorkspace } from "@/components/workspace/mind-workspace";
 import { listRecentMemoryEntries } from "@/lib/memory/queries";
+import {
+  listEdges,
+  listNodeMemoryTrails,
+  listNodes,
+} from "@/lib/graph/queries";
 import { requireUser } from "@/lib/supabase/auth";
 
 import { signOutAction } from "./login/actions";
@@ -10,7 +16,14 @@ export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const user = await requireUser();
-  const recent = await listRecentMemoryEntries(20);
+
+  const [recent, nodes, edges] = await Promise.all([
+    listRecentMemoryEntries(20),
+    listNodes(),
+    listEdges(),
+  ]);
+
+  const memoryTrails = await listNodeMemoryTrails(nodes.map((n) => n.id));
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -57,26 +70,11 @@ export default async function HomePage() {
           </section>
         </aside>
 
-        <section
-          aria-label="Canvas"
-          className="relative flex min-h-[55vh] flex-1 items-center justify-center bg-canvas-bg p-6 lg:min-h-0"
-        >
-          <p className="text-center text-sm text-neutral-500">
-            Canvas will render here once the graph is wired up.
-          </p>
-        </section>
-
-        <aside
-          aria-label="Node detail"
-          className="flex flex-col gap-2 border-t border-canvas-border bg-canvas-surface p-4 sm:p-5 lg:w-80 lg:shrink-0 lg:border-l lg:border-t-0"
-        >
-          <h2 className="text-sm font-medium uppercase tracking-wider text-neutral-400">
-            Node detail
-          </h2>
-          <p className="text-sm text-neutral-500">
-            Selected node summary and memory trail will appear here.
-          </p>
-        </aside>
+        <MindWorkspace
+          initialNodes={nodes}
+          initialEdges={edges}
+          memoryTrails={memoryTrails}
+        />
       </div>
     </div>
   );
