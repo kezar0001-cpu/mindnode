@@ -1,1 +1,140 @@
-# mindnode
+# MindNode
+
+MindNode is a personal AI memory canvas.
+
+It allows the user to type unstructured thoughts, ideas, plans, reflections, and memories into a chat-style input. AI then analyses the new input against the existing memory graph and suggests where the idea belongs. The accepted result becomes part of an interactive visual canvas made of connected nodes.
+
+## Purpose
+
+MindNode is designed to help turn scattered thinking into a navigable personal knowledge network.
+
+It is part:
+
+- digital moodboard
+- vision board
+- mind map
+- memory system
+- AI thinking companion
+
+## Core Workflow
+
+1. User enters a messy thought.
+2. The thought is saved as a raw memory entry.
+3. AI reviews the thought against existing nodes.
+4. AI suggests whether to create a new node, update an existing node, or link related nodes.
+5. User accepts the suggestion.
+6. The graph updates visually.
+7. User can explore the canvas and inspect the memory trail behind each node.
+
+## MVP Features
+
+- Raw thought input
+- Supabase persistence
+- AI graph suggestion
+- Accept suggestion flow
+- Interactive canvas
+- Node and edge display
+- Node detail panel
+- Memory history per node
+
+## Tech Stack
+
+- Next.js (App Router)
+- TypeScript
+- Tailwind CSS
+- Supabase
+- React Flow (`@xyflow/react`)
+- Zod
+- AI provider through server-side API routes
+
+## Local Development
+
+Install dependencies:
+
+```bash
+pnpm install
+```
+
+Run the development server:
+
+```bash
+pnpm dev
+```
+
+Run linting:
+
+```bash
+pnpm lint
+```
+
+Run type checks:
+
+```bash
+pnpm typecheck
+```
+
+Run build:
+
+```bash
+pnpm build
+```
+
+## Environment Variables
+
+Create a `.env.local` file using `.env.example` as a guide.
+
+Required variables:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+AI_PROVIDER_API_KEY=
+```
+
+Never expose service role keys or AI provider keys to the browser.
+
+## Project Structure
+
+```
+src/app/                  Next.js app routes
+src/components/           React components
+src/components/canvas/    Graph canvas components
+src/components/input/     Thought input components
+src/components/nodes/     Node UI components
+src/lib/                  Shared logic
+src/lib/ai/               AI prompts, schemas, parsing
+src/lib/graph/            Graph utility functions
+src/lib/supabase/         Supabase clients and queries
+src/types/                Shared TypeScript types
+supabase/migrations/      Database migrations
+docs/                     Product and architecture notes
+```
+
+## Build Order
+
+1. Scaffold project.
+2. Add Supabase schema.
+3. Add basic React Flow canvas.
+4. Add raw thought input.
+5. Add AI suggestion route.
+6. Add suggestion review UI.
+7. Add accept/apply graph update.
+8. Add node detail panel.
+9. Add memory history per node.
+
+## Product Rule
+
+**Raw thoughts must always be preserved.**
+
+AI summaries, nodes, and edges are derived from raw entries. They should never replace the original input.
+
+## Documentation
+
+Detailed product and engineering notes live in [`docs/`](./docs):
+
+- [`PRODUCT_SPEC.md`](./docs/PRODUCT_SPEC.md) — product vision and MVP scope
+- [`ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — system architecture overview
+- [`DATA_MODEL.md`](./docs/DATA_MODEL.md) — database entities and relationships
+- [`AI_BEHAVIOUR.md`](./docs/AI_BEHAVIOUR.md) — AI suggestion contract
+- [`ROADMAP.md`](./docs/ROADMAP.md) — staged build plan
