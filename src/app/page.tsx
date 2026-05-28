@@ -1,3 +1,6 @@
+import { RecentThoughtsList } from "@/components/input/recent-thoughts-list";
+import { ThoughtInputForm } from "@/components/input/thought-input-form";
+import { listRecentMemoryEntries } from "@/lib/memory/queries";
 import { requireUser } from "@/lib/supabase/auth";
 
 import { signOutAction } from "./login/actions";
@@ -7,6 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const user = await requireUser();
+  const recent = await listRecentMemoryEntries(20);
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -36,14 +40,21 @@ export default async function HomePage() {
       <div className="flex flex-1 flex-col lg:flex-row">
         <aside
           aria-label="Thought input"
-          className="flex flex-col gap-2 border-b border-canvas-border bg-canvas-surface p-4 sm:p-5 lg:w-80 lg:shrink-0 lg:border-b-0 lg:border-r"
+          className="flex flex-col gap-6 border-b border-canvas-border bg-canvas-surface p-4 sm:p-5 lg:w-96 lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-r"
         >
-          <h2 className="text-sm font-medium uppercase tracking-wider text-neutral-400">
-            Thought input
-          </h2>
-          <p className="text-sm text-neutral-500">
-            The chat-style input panel will live here.
-          </p>
+          <section>
+            <h2 className="mb-2 text-sm font-medium uppercase tracking-wider text-neutral-400">
+              Capture a thought
+            </h2>
+            <ThoughtInputForm />
+          </section>
+
+          <section>
+            <h2 className="mb-2 text-sm font-medium uppercase tracking-wider text-neutral-400">
+              Recent thoughts
+            </h2>
+            <RecentThoughtsList entries={recent} />
+          </section>
         </aside>
 
         <section
@@ -57,7 +68,7 @@ export default async function HomePage() {
 
         <aside
           aria-label="Node detail"
-          className="flex flex-col gap-2 border-t border-canvas-border bg-canvas-surface p-4 sm:p-5 lg:w-96 lg:shrink-0 lg:border-l lg:border-t-0"
+          className="flex flex-col gap-2 border-t border-canvas-border bg-canvas-surface p-4 sm:p-5 lg:w-80 lg:shrink-0 lg:border-l lg:border-t-0"
         >
           <h2 className="text-sm font-medium uppercase tracking-wider text-neutral-400">
             Node detail

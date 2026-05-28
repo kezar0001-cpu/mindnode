@@ -51,6 +51,12 @@ It is part:
 
 The app shell is mobile-first. On phones (the primary target) `/` is a single-column stack — header, thought input, canvas, node detail. From the `lg` breakpoint (≥1024px) the three regions sit side by side. Inputs use a ≥16px font so iOS Safari doesn't zoom on focus, and the root uses `min-h-dvh` to play nicely with the changing viewport when the Safari address bar shows or hides.
 
+## Status
+
+- Auth + RLS in place (every row of every table belongs to a single user; per-user CRUD policies).
+- Raw thought capture and persistence in place. Signed-in users can write a thought, submit it via a server action, and see their 20 most-recent entries below the form. Each entry is stored in `memory_entries` with `source: "manual"`.
+- AI suggestion pipeline, React Flow canvas, node detail content: not yet started.
+
 ## Local Development
 
 Install dependencies:
