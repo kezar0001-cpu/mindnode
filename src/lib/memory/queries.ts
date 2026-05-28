@@ -25,3 +25,15 @@ export async function listRecentMemoryEntries(
 
   return data ?? [];
 }
+
+// Returns the IDs of memory entries that are already linked to at least
+// one node, so the UI can show "On canvas" instead of "Add to canvas".
+export async function listPromotedMemoryIds(): Promise<string[]> {
+  const supabase = await createSupabaseServerClient();
+
+  const { data } = await supabase
+    .from("node_memory_links")
+    .select("memory_entry_id");
+
+  return (data ?? []).map((r) => r.memory_entry_id);
+}

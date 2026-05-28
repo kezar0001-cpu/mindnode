@@ -25,18 +25,27 @@ export async function updateNodePositionAction(
   }
 }
 
+// Derive a short node title from raw thought content.
+// Takes the first ~8 words, capped at 60 characters.
+function deriveTitle(content: string): string {
+  const text = content.replace(/\s+/g, " ").trim();
+  if (!text) return "Untitled thought";
+  const words = text.split(" ");
+  const short = words.slice(0, 8).join(" ");
+  if (short.length <= 60) return short;
+  return short.slice(0, 57) + "…";
+}
+
 export async function createNodeFromMemoryAction(
   memoryId: string,
-  title: string,
-  category: string,
 ): Promise<{ success: boolean; error?: string }> {
   const user = await requireUser();
   const supabase = await createSupabaseServerClient();
 
-  // Confirm the memory entry belongs to the signed-in user.
+  // Fetch the memory entry, confirming it belongs to the signed-in user.
   const { data: memoryEntry, error: memoryError } = await supabase
     .from("memory_entries")
-    .select("id")
+    .select("id, content")
     .eq("id", memoryId)
     .eq("user_id", user.id)
     .single();
@@ -45,14 +54,19 @@ export async function createNodeFromMemoryAction(
     return { success: false, error: "Memory entry not found." };
   }
 
-  const trimmedTitle = title.trim();
-  const trimmedCategory = category.trim() || "general";
+  // Block duplicate promotion — one node per memory entry.
+  const { data: existingLink } = await supabase
+    .from("node_memory_links")
+    .select("id")
+    .eq("memory_entry_id", memoryId)
+    .eq("user_id", user.id)
+    .maybeSingle();
 
-  if (!trimmedTitle) {
-    return { success: false, error: "Title is required." };
+  if (existingLink) {
+    return { success: false, error: "already_on_canvas" };
   }
 
-  // Scatter new nodes in a 400×300 window centred at the canvas origin.
+  // Scatter new nodes within a 400×300 window centred at the origin.
   const position_x = (Math.random() - 0.5) * 400;
   const position_y = (Math.random() - 0.5) * 300;
 
@@ -60,9 +74,9 @@ export async function createNodeFromMemoryAction(
     .from("nodes")
     .insert({
       user_id: user.id,
-      title: trimmedTitle,
-      summary: "",
-      category: trimmedCategory,
+      title: deriveTitle(memoryEntry.content),
+      summary: memoryEntry.content,
+      category: "general",
       position_x,
       position_y,
     })
@@ -80,7 +94,7 @@ export async function createNodeFromMemoryAction(
   });
 
   if (linkError) {
-    // Clean up the orphaned node so the DB invariant (every node has ≥1 link) holds.
+    // Clean up the orphaned node so the invariant (every node ≥1 link) holds.
     await supabase.from("nodes").delete().eq("id", node.id);
     return {
       success: false,

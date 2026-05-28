@@ -1,7 +1,10 @@
 import { RecentThoughtsList } from "@/components/input/recent-thoughts-list";
 import { ThoughtInputForm } from "@/components/input/thought-input-form";
 import { MindWorkspace } from "@/components/workspace/mind-workspace";
-import { listRecentMemoryEntries } from "@/lib/memory/queries";
+import {
+  listRecentMemoryEntries,
+  listPromotedMemoryIds,
+} from "@/lib/memory/queries";
 import {
   listEdges,
   listNodeMemoryTrails,
@@ -17,10 +20,11 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const user = await requireUser();
 
-  const [recent, nodes, edges] = await Promise.all([
+  const [recent, nodes, edges, promotedMemoryIds] = await Promise.all([
     listRecentMemoryEntries(20),
     listNodes(),
     listEdges(),
+    listPromotedMemoryIds(),
   ]);
 
   const memoryTrails = await listNodeMemoryTrails(nodes.map((n) => n.id));
@@ -66,7 +70,10 @@ export default async function HomePage() {
             <h2 className="mb-2 text-sm font-medium uppercase tracking-wider text-neutral-400">
               Recent thoughts
             </h2>
-            <RecentThoughtsList entries={recent} />
+            <RecentThoughtsList
+              entries={recent}
+              promotedMemoryIds={promotedMemoryIds}
+            />
           </section>
         </aside>
 
