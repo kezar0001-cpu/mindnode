@@ -47,6 +47,10 @@ It is part:
 - Zod
 - AI provider through server-side API routes
 
+## UI Shell
+
+The app shell is mobile-first. On phones (the primary target) `/` is a single-column stack — header, thought input, canvas, node detail. From the `lg` breakpoint (≥1024px) the three regions sit side by side. Inputs use a ≥16px font so iOS Safari doesn't zoom on focus, and the root uses `min-h-dvh` to play nicely with the changing viewport when the Safari address bar shows or hides.
+
 ## Local Development
 
 Install dependencies:

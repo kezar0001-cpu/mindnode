@@ -20,8 +20,8 @@ export default async function LoginPage({
   const { error } = await searchParams;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-canvas-bg p-6">
-      <div className="w-full max-w-sm rounded-md border border-canvas-border bg-canvas-surface p-6">
+    <main className="flex min-h-dvh items-center justify-center bg-canvas-bg p-4 sm:p-6">
+      <div className="w-full max-w-sm rounded-md border border-canvas-border bg-canvas-surface p-5 sm:p-6">
         <h1 className="text-xl font-semibold tracking-tight">MindNode</h1>
         <p className="mb-6 mt-1 text-sm text-neutral-500">
           Sign in to continue.
@@ -40,8 +40,9 @@ export default async function LoginPage({
               name="email"
               type="email"
               autoComplete="email"
+              inputMode="email"
               required
-              className="w-full rounded border border-canvas-border bg-canvas-bg px-3 py-2 text-sm outline-none focus:border-neutral-400"
+              className="w-full rounded border border-canvas-border bg-canvas-bg px-3 py-2.5 text-base outline-none focus:border-neutral-400"
             />
           </div>
 
@@ -58,7 +59,7 @@ export default async function LoginPage({
               type="password"
               autoComplete="current-password"
               required
-              className="w-full rounded border border-canvas-border bg-canvas-bg px-3 py-2 text-sm outline-none focus:border-neutral-400"
+              className="w-full rounded border border-canvas-border bg-canvas-bg px-3 py-2.5 text-base outline-none focus:border-neutral-400"
             />
           </div>
 
@@ -70,7 +71,7 @@ export default async function LoginPage({
 
           <button
             type="submit"
-            className="w-full rounded bg-neutral-100 px-3 py-2 text-sm font-medium text-canvas-bg hover:bg-white"
+            className="w-full rounded bg-neutral-100 px-3 py-3 text-sm font-medium text-canvas-bg hover:bg-white"
           >
             Sign in
           </button>
