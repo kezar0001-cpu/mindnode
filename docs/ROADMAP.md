@@ -18,11 +18,17 @@ Staged plan. Each stage should land in small commits and be usable end-to-end be
 - RLS policies (`user_id = auth.uid()`).
 - Server and browser Supabase clients in `src/lib/supabase/`.
 
-## Stage 2 — Raw thought input + persistence
+## Stage 2 — Raw thought input + persistence ✅
 
-- Input panel UI.
-- `/api/memory` route that inserts into `memory_entries`.
-- No AI call yet — just confirm thoughts persist.
+- Input panel UI (`src/components/input/thought-input-form.tsx`) and
+  recent-thoughts list (`src/components/input/recent-thoughts-list.tsx`).
+- Server action `createMemoryEntryAction` in `src/lib/memory/actions.ts`
+  validates input (non-empty, ≤5000 chars), uses the user-scoped
+  Supabase client, and inserts into `memory_entries` with
+  `source: "manual"` and an empty metadata object.
+- `listRecentMemoryEntries` (`src/lib/memory/queries.ts`) loads the
+  20 most-recent entries for the signed-in user.
+- No AI call yet — thoughts persist and round-trip per user only.
 
 ## Stage 3 — Basic canvas
 

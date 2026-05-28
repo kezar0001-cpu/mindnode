@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.5.2",
+    "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.46.1",
     "@xyflow/react": "^12.3.5",
     "next": "^15.1.4",
