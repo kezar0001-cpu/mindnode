@@ -1,7 +1,7 @@
 // Hand-written Database type for the Supabase client.
-// Kept in sync with supabase/migrations/20260528000000_initial_schema.sql.
-// When the schema grows, regenerate this file with `supabase gen types`
-// to remove the manual maintenance burden.
+// Kept in sync with the migrations in supabase/migrations/.
+// Regenerate later via `supabase gen types typescript --linked`
+// once the schema stops moving.
 
 import type {
   AISuggestionPayload,
@@ -22,6 +22,7 @@ export interface Database {
       memory_entries: {
         Row: {
           id: string;
+          user_id: string;
           content: string;
           source: string;
           metadata: Json;
@@ -29,6 +30,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
+          user_id: string;
           content: string;
           source?: string;
           metadata?: Json;
@@ -36,16 +38,25 @@ export interface Database {
         };
         Update: {
           id?: string;
+          user_id?: string;
           content?: string;
           source?: string;
           metadata?: Json;
           created_at?: string;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "memory_entries_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       nodes: {
         Row: {
           id: string;
+          user_id: string;
           title: string;
           summary: string;
           category: string;
@@ -56,6 +67,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
+          user_id: string;
           title: string;
           summary?: string;
           category?: string;
@@ -66,6 +78,7 @@ export interface Database {
         };
         Update: {
           id?: string;
+          user_id?: string;
           title?: string;
           summary?: string;
           category?: string;
@@ -74,11 +87,19 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "nodes_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       edges: {
         Row: {
           id: string;
+          user_id: string;
           source_node_id: string;
           target_node_id: string;
           relationship_type: string;
@@ -88,6 +109,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
+          user_id: string;
           source_node_id: string;
           target_node_id: string;
           relationship_type?: string;
@@ -97,6 +119,7 @@ export interface Database {
         };
         Update: {
           id?: string;
+          user_id?: string;
           source_node_id?: string;
           target_node_id?: string;
           relationship_type?: string;
@@ -117,11 +140,18 @@ export interface Database {
             referencedRelation: "nodes";
             referencedColumns: ["id"];
           },
+          {
+            foreignKeyName: "edges_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
         ];
       };
       ai_suggestions: {
         Row: {
           id: string;
+          user_id: string;
           memory_entry_id: string;
           suggestion_json: AISuggestionPayload;
           status: AISuggestionStatus;
@@ -130,6 +160,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
+          user_id: string;
           memory_entry_id: string;
           suggestion_json: AISuggestionPayload;
           status?: AISuggestionStatus;
@@ -138,6 +169,7 @@ export interface Database {
         };
         Update: {
           id?: string;
+          user_id?: string;
           memory_entry_id?: string;
           suggestion_json?: AISuggestionPayload;
           status?: AISuggestionStatus;
@@ -151,23 +183,32 @@ export interface Database {
             referencedRelation: "memory_entries";
             referencedColumns: ["id"];
           },
+          {
+            foreignKeyName: "ai_suggestions_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
         ];
       };
       node_memory_links: {
         Row: {
           id: string;
+          user_id: string;
           node_id: string;
           memory_entry_id: string;
           created_at: string;
         };
         Insert: {
           id?: string;
+          user_id: string;
           node_id: string;
           memory_entry_id: string;
           created_at?: string;
         };
         Update: {
           id?: string;
+          user_id?: string;
           node_id?: string;
           memory_entry_id?: string;
           created_at?: string;
@@ -183,6 +224,12 @@ export interface Database {
             foreignKeyName: "node_memory_links_memory_entry_id_fkey";
             columns: ["memory_entry_id"];
             referencedRelation: "memory_entries";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "node_memory_links_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
             referencedColumns: ["id"];
           },
         ];

@@ -92,7 +92,23 @@ SUPABASE_SERVICE_ROLE_KEY=
 AI_PROVIDER_API_KEY=
 ```
 
-Never expose service role keys or AI provider keys to the browser.
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are required for sign-in to work. `SUPABASE_SERVICE_ROLE_KEY` is server-only and used only by `src/lib/supabase/admin.ts` for admin tasks that need to bypass RLS. Never expose service role or AI provider keys to the browser.
+
+## Auth & RLS
+
+The app is single-user in spirit but multi-tenant at the database layer so that personal data is protected on a hosted Supabase project. Two migrations form the foundation:
+
+1. `20260528000000_initial_schema.sql` — core MVP tables.
+2. `20260528010000_add_auth_and_rls.sql` — adds `user_id` columns referencing `auth.users(id)`, enables RLS on all five core tables, and adds per-user select / insert / update / delete policies.
+
+**Creating the first user**: there is no sign-up flow yet. Create your user via the Supabase dashboard:
+
+1. Open your Supabase project.
+2. Go to **Authentication → Users → Add user**.
+3. Set email + password and tick "Auto Confirm User".
+4. Visit the app and sign in at `/login` with those credentials.
+
+The home page is protected: unauthenticated visitors are redirected to `/login`.
 
 ## Project Structure
 

@@ -12,6 +12,7 @@ export type ISODateString = string;
 
 export interface MemoryEntry {
   id: UUID;
+  user_id: UUID;
   content: string;
   source: string;
   metadata: Record<string, unknown>;
@@ -20,6 +21,7 @@ export interface MemoryEntry {
 
 export interface GraphNode {
   id: UUID;
+  user_id: UUID;
   title: string;
   summary: string;
   category: string;
@@ -31,6 +33,7 @@ export interface GraphNode {
 
 export interface GraphEdge {
   id: UUID;
+  user_id: UUID;
   source_node_id: UUID;
   target_node_id: UUID;
   relationship_type: string;
@@ -41,6 +44,7 @@ export interface GraphEdge {
 
 export interface NodeMemoryLink {
   id: UUID;
+  user_id: UUID;
   node_id: UUID;
   memory_entry_id: UUID;
   created_at: ISODateString;
@@ -75,6 +79,7 @@ export interface AISuggestionPayload {
 
 export interface AISuggestion {
   id: UUID;
+  user_id: UUID;
   memory_entry_id: UUID;
   suggestion_json: AISuggestionPayload;
   status: AISuggestionStatus;
