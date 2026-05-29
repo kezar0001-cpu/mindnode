@@ -270,11 +270,15 @@ export function Canvas({
   if (dbNodes.length === 0 && ghostSuggestions.length === 0) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <p className="text-center text-sm leading-relaxed text-neutral-500">
-          Drop your first thought below.
-          <br />
-          I&apos;ll suggest where it belongs.
-        </p>
+        <div className="max-w-xs text-center">
+          <p className="text-base font-semibold text-neutral-200">
+            Capture your first thought.
+          </p>
+          <p className="mt-2 text-sm leading-relaxed text-neutral-500">
+            MindNode will map it on the canvas and branch related avenues
+            around it as your graph grows.
+          </p>
+        </div>
       </div>
     );
   }

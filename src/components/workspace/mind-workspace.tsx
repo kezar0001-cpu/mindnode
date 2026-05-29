@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 
 import { Canvas, type GhostSuggestion } from "@/components/canvas/Canvas";
 import { NodeDetail } from "@/components/nodes/node-detail";
@@ -21,7 +21,7 @@ type MindWorkspaceProps = {
   userEmail: string;
 };
 
-type ActiveSheet = "composer" | "thoughts" | "detail" | null;
+type ActiveSheet = "composer" | "thoughts" | "detail" | "search" | null;
 
 type ApiSuggestion = {
   title: string;
@@ -108,8 +108,25 @@ export function MindWorkspace({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
   const [ghosts, setGhosts] = useState<GhostSuggestion[]>([]);
+  // ghostId -> real_node_id created when that ghost was pinned. Lets a
+  // child ghost (whose parent has already been pinned) connect to the
+  // parent's new real node instead of the original root.
+  const [pinnedGhostMap, setPinnedGhostMap] = useState<Record<string, string>>({});
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return initialNodes
+      .filter(
+        (n) =>
+          n.title.toLowerCase().includes(q) ||
+          n.summary.toLowerCase().includes(q),
+      )
+      .slice(0, 20);
+  }, [initialNodes, searchQuery]);
 
   // When user selects a different real node, drop ghosts whose anchor
   // no longer matches. Pane-click (null) leaves ghosts alone.
@@ -268,8 +285,15 @@ export function MindWorkspace({
       setAiError(null);
 
       let sourceNodeId: string | undefined;
-      if (ghost.anchor_type === "real_node") sourceNodeId = ghost.anchor_node_id;
-      else if (ghost.anchor_type === "ghost_node") sourceNodeId = ghost.root_node_id;
+      if (ghost.anchor_type === "real_node") {
+        sourceNodeId = ghost.anchor_node_id;
+      } else if (ghost.anchor_type === "ghost_node") {
+        // If the parent ghost has already been pinned, attach to its new real
+        // node; otherwise fall back to the nearest real root.
+        const parentReal =
+          ghost.parent_ghost_id && pinnedGhostMap[ghost.parent_ghost_id];
+        sourceNodeId = parentReal || ghost.root_node_id;
+      }
 
       const result = await pinGhostSuggestionAction({
         title: ghost.title,
@@ -285,10 +309,17 @@ export function MindWorkspace({
         setAiError(result.error ?? "Could not pin to canvas.");
         return;
       }
+      if (result.node_id) {
+        setPinnedGhostMap((prev) => ({ ...prev, [ghost.id]: result.node_id! }));
+      }
       setGhosts((prev) => prev.filter((g) => g.id !== ghostId));
     },
-    [ghosts],
+    [ghosts, pinnedGhostMap],
   );
+
+  const handleClearGhosts = useCallback(() => {
+    setGhosts([]);
+  }, []);
 
   const handleGhostDismiss = useCallback((ghostId: string) => {
     setGhosts((prev) => prev.filter((g) => g.id !== ghostId));
@@ -335,6 +366,27 @@ export function MindWorkspace({
             className="rounded-full border border-purple-400/40 bg-purple-950/30 px-3 py-1.5 text-xs font-medium text-purple-200 hover:bg-purple-950/50 disabled:opacity-50"
           >
             {suggestLabel}
+          </button>
+          {ghosts.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearGhosts}
+              title="Clear AI suggestions"
+              className="rounded-full border border-canvas-border bg-canvas-surface px-2 py-1.5 text-[10px] font-medium text-neutral-400 hover:text-neutral-100"
+            >
+              Clear
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => openSheet("search")}
+            aria-label="Search"
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
+          >
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <circle cx="5.5" cy="5.5" r="3.5" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M8.5 8.5L11.5 11.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
           </button>
           <button
             type="button"
@@ -433,6 +485,53 @@ export function MindWorkspace({
             setSelectedNodeId(id);
           }}
         />
+      </BottomSheet>
+
+      <BottomSheet
+        open={activeSheet === "search"}
+        onClose={() => {
+          setSearchQuery("");
+          closeSheet();
+        }}
+        title="Search thoughts"
+      >
+        <input
+          type="search"
+          autoFocus
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search titles and thoughts…"
+          className="block w-full rounded border border-canvas-border bg-canvas-bg px-3 py-2 text-sm text-neutral-100 outline-none focus:border-teal-300"
+        />
+        {searchResults.length > 0 ? (
+          <ul className="mt-3 space-y-2">
+            {searchResults.map((node) => (
+              <li key={node.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery("");
+                    handleNodeSelect(node.id);
+                  }}
+                  className="block w-full rounded border border-canvas-border bg-canvas-bg p-3 text-left hover:border-teal-300/40"
+                >
+                  <p className="line-clamp-1 text-sm font-medium text-neutral-100">
+                    {node.title}
+                  </p>
+                  <p className="mt-1 line-clamp-2 text-xs text-neutral-500">
+                    {node.summary}
+                  </p>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-3 text-xs text-neutral-500">
+            {searchQuery.trim()
+              ? "No matches."
+              : "Type to search your thoughts."}
+          </p>
+        )}
       </BottomSheet>
     </div>
   );
