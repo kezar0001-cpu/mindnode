@@ -489,6 +489,137 @@ export interface Database {
           },
         ];
       };
+      chat_conversations: {
+        Row: {
+          id: string;
+          user_id: string;
+          title: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          title?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          title?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "chat_conversations_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      chat_messages: {
+        Row: {
+          id: string;
+          conversation_id: string;
+          user_id: string;
+          // "user" | "assistant" — enforced by DB CHECK constraint.
+          role: string;
+          content: string;
+          citations_json: Json;
+          used_context_json: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          conversation_id: string;
+          user_id: string;
+          role: string;
+          content: string;
+          citations_json?: Json;
+          used_context_json?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          conversation_id?: string;
+          user_id?: string;
+          role?: string;
+          content?: string;
+          citations_json?: Json;
+          used_context_json?: Json;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_conversation_id_fkey";
+            columns: ["conversation_id"];
+            referencedRelation: "chat_conversations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "chat_messages_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      chat_graph_suggestions: {
+        Row: {
+          id: string;
+          conversation_id: string;
+          message_id: string | null;
+          user_id: string;
+          suggestion_json: Json;
+          // "pending" | "applied" | "dismissed" — enforced by DB CHECK constraint.
+          status: string;
+          created_at: string;
+          applied_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          conversation_id: string;
+          message_id?: string | null;
+          user_id: string;
+          suggestion_json: Json;
+          status?: string;
+          created_at?: string;
+          applied_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          conversation_id?: string;
+          message_id?: string | null;
+          user_id?: string;
+          suggestion_json?: Json;
+          status?: string;
+          created_at?: string;
+          applied_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "chat_graph_suggestions_conversation_id_fkey";
+            columns: ["conversation_id"];
+            referencedRelation: "chat_conversations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "chat_graph_suggestions_message_id_fkey";
+            columns: ["message_id"];
+            referencedRelation: "chat_messages";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "chat_graph_suggestions_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       node_memory_links: {
         Row: {
           id: string;

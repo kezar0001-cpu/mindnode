@@ -26,14 +26,16 @@ export type NodeOrigin =
   | "imported"
   | "document_ai"
   | "document_root"
-  | "document_section";
+  | "document_section"
+  | "chat_suggested";
 export type EdgeOrigin =
   | "manual"
   | "auto_keyword"
   | "ai_pinned"
   | "ai_suggested"
   | "document_ai"
-  | "document_structure";
+  | "document_structure"
+  | "chat_suggested";
 
 export type DocumentStatus =
   | "uploaded"
@@ -113,4 +115,50 @@ export interface AISuggestion {
   status: AISuggestionStatus;
   created_at: ISODateString;
   accepted_at: ISODateString | null;
+}
+
+// ---------------------------------------------------------------------------
+// Chat brain — conversations, messages, and proposed graph changes.
+// Mirrors supabase/migrations/20260531000000_add_chat_brain.sql.
+// ---------------------------------------------------------------------------
+
+export type ChatRole = "user" | "assistant";
+
+export type ChatMode = "global" | "node_focus" | "document_focus" | "graph_review";
+
+// A single source/graph reference the AI used to ground an answer.
+export interface ChatCitation {
+  type: "source" | "node";
+  label: string;
+  ref?: string;
+}
+
+// A node the AI proposes adding to the graph. Edges reference nodes by title.
+export interface ProposedNode {
+  title: string;
+  summary: string;
+  category: string;
+  reason?: string;
+}
+
+export interface ProposedEdge {
+  source_title: string;
+  target_title: string;
+  relationship_type: string;
+  reason?: string;
+}
+
+export interface ProposedGraphChanges {
+  nodes: ProposedNode[];
+  edges: ProposedEdge[];
+}
+
+export interface ChatMessageRecord {
+  id: UUID;
+  conversation_id: UUID;
+  user_id: UUID;
+  role: ChatRole;
+  content: string;
+  citations: ChatCitation[];
+  created_at: ISODateString;
 }
