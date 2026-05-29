@@ -16,6 +16,9 @@ type UploadResultDetails = {
   chunksCreated: number;
   nodesCreated: number;
   edgesCreated: number;
+  existingNodesLinked: number;
+  duplicatesSkipped: number;
+  processingReport: string;
   warningsCount: number;
   finalStatus: string;
 };
@@ -38,11 +41,15 @@ const MAX_BYTES = 10 * 1024 * 1024;
 type UploadResponse = {
   ok: boolean;
   document_id?: string;
+  document_root_node_id?: string | null;
   notes_created?: number;
   section_count?: number;
   chunk_count?: number;
   nodes_created?: number;
   edges_created?: number;
+  existing_nodes_linked?: number;
+  duplicates_skipped?: number;
+  processing_report?: string;
   warnings_count?: number;
   warnings?: string[];
   status?: string;
@@ -64,8 +71,12 @@ export function DocumentUploadSheet({
 }: {
   onSuccess?: (result: {
     documentId: string;
+    documentRootNodeId: string | null;
     nodesCreated: number;
     edgesCreated: number;
+    existingNodesLinked: number;
+    duplicatesSkipped: number;
+    processingReport: string;
     warningsCount: number;
     filename: string;
     sectionCount: number;
@@ -78,7 +89,6 @@ export function DocumentUploadSheet({
 
   const isWorking = state.status === "working";
 
-  // Stage cycler — advance the visible label while the upload is in flight.
   useEffect(() => {
     if (state.status !== "working") return;
     const stages: Exclude<UploadStage, "idle" | "done" | "error">[] = [
@@ -138,10 +148,7 @@ export function DocumentUploadSheet({
 
     const contentType = response.headers.get("content-type") ?? "";
     console.info("[documents/upload] response.status", response.status);
-    console.info(
-      "[documents/upload] response.headers content-type",
-      contentType,
-    );
+    console.info("[documents/upload] response.headers content-type", contentType);
 
     let rawText = "";
     try {
@@ -165,7 +172,7 @@ export function DocumentUploadSheet({
       const preview = rawText.slice(0, 300) || "<empty response>";
       setState({
         status: "error",
-        message: `Server returned a non-JSON response (HTTP ${response.status}). Preview: ${preview}. The upload may have reached the server; please refresh the graph or check Documents before retrying.`,
+        message: `Server returned a non-JSON response (HTTP ${response.status}). Preview: ${preview}.`,
       });
       return;
     }
@@ -185,14 +192,18 @@ export function DocumentUploadSheet({
     const warningsCount = body.warnings_count ?? body.warnings?.length ?? 0;
     const sectionCount = body.section_count ?? 0;
     const chunkCount = body.chunk_count ?? 0;
+    const existingNodesLinked = body.existing_nodes_linked ?? 0;
+    const duplicatesSkipped = body.duplicates_skipped ?? 0;
+    const processingReport = body.processing_report ?? "";
     const finalStatus = body.status ?? "processed";
     const processedWithWarnings =
       finalStatus === "processed_with_warnings" || warningsCount > 0;
     const message = processedWithWarnings
-      ? `Processed ${file.name} with warnings.`
+      ? `Processed with warnings.`
       : nodesCreated > 0
-        ? `Processed ${file.name} successfully.`
-        : `Saved ${file.name}, but no nodes were created.`;
+        ? `Processed successfully.`
+        : `Saved, but no nodes were created.`;
+
     setState({
       status: "success",
       message,
@@ -201,14 +212,21 @@ export function DocumentUploadSheet({
         chunksCreated: chunkCount,
         nodesCreated,
         edgesCreated,
+        existingNodesLinked,
+        duplicatesSkipped,
+        processingReport,
         warningsCount,
         finalStatus,
       },
     });
     onSuccess?.({
       documentId: body.document_id ?? "",
+      documentRootNodeId: body.document_root_node_id ?? null,
       nodesCreated,
       edgesCreated,
+      existingNodesLinked,
+      duplicatesSkipped,
+      processingReport,
       warningsCount,
       filename: file.name,
       sectionCount,
@@ -221,8 +239,8 @@ export function DocumentUploadSheet({
   return (
     <div className="space-y-3">
       <p className="text-xs leading-relaxed text-neutral-400">
-        Upload a .txt, .md, .pdf, or .docx file. The AI reads it section by
-        section and turns it into a knowledge graph. Limit: 10MB.
+        Upload a .txt, .md, .pdf, or .docx file. AI reads every section and
+        builds a knowledge graph. Large documents produce 20–80 nodes. Limit: 10MB.
       </p>
 
       <label
@@ -272,8 +290,7 @@ export function DocumentUploadSheet({
         <div className="flex items-center gap-2 text-xs text-neutral-400">
           <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-neutral-600 border-t-teal-300" />
           <span>
-            {STAGE_LABEL[state.stage]} this can take 30 to 60 seconds for large
-            files.
+            {STAGE_LABEL[state.stage]} Large files can take 60–120 seconds.
           </span>
         </div>
       )}
@@ -281,6 +298,11 @@ export function DocumentUploadSheet({
       {state.status === "success" && (
         <div className="rounded-md border border-emerald-500/30 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
           <p className="font-medium">{state.message}</p>
+          {state.details.processingReport && (
+            <p className="mt-1 text-[11px] text-emerald-100/70">
+              {state.details.processingReport}
+            </p>
+          )}
           <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-emerald-100/80">
             <div>
               <dt className="text-neutral-400">Sections</dt>
@@ -291,28 +313,32 @@ export function DocumentUploadSheet({
               <dd>{state.details.chunksCreated}</dd>
             </div>
             <div>
-              <dt className="text-neutral-400">Nodes</dt>
+              <dt className="text-neutral-400">Nodes created</dt>
               <dd>{state.details.nodesCreated}</dd>
             </div>
             <div>
-              <dt className="text-neutral-400">Edges</dt>
+              <dt className="text-neutral-400">Edges created</dt>
               <dd>{state.details.edgesCreated}</dd>
             </div>
-            <div>
-              <dt className="text-neutral-400">Warnings</dt>
-              <dd>{state.details.warningsCount}</dd>
-            </div>
-            <div>
-              <dt className="text-neutral-400">Final status</dt>
-              <dd>{state.details.finalStatus}</dd>
-            </div>
+            {state.details.existingNodesLinked > 0 && (
+              <div>
+                <dt className="text-neutral-400">Linked existing</dt>
+                <dd>{state.details.existingNodesLinked}</dd>
+              </div>
+            )}
+            {state.details.duplicatesSkipped > 0 && (
+              <div>
+                <dt className="text-neutral-400">Duplicates skipped</dt>
+                <dd>{state.details.duplicatesSkipped}</dd>
+              </div>
+            )}
+            {state.details.warningsCount > 0 && (
+              <div className="col-span-2">
+                <dt className="text-neutral-400">Warnings</dt>
+                <dd className="text-amber-300">{state.details.warningsCount}</dd>
+              </div>
+            )}
           </dl>
-          {state.details.warningsCount > 0 && (
-            <p className="mt-2 text-amber-300/90">
-              Processed with {state.details.warningsCount} warning
-              {state.details.warningsCount === 1 ? "" : "s"}.
-            </p>
-          )}
         </div>
       )}
 

@@ -968,7 +968,7 @@ export function MindWorkspace({
           >
             Upload document
           </button>
-          <DocumentList documents={sourceDocuments} />
+          <DocumentList documents={sourceDocuments} onSelectNode={handleNodeSelect} />
         </div>
       </BottomSheet>
 
@@ -981,30 +981,29 @@ export function MindWorkspace({
           onSuccess={({
             nodesCreated,
             edgesCreated,
+            existingNodesLinked,
+            duplicatesSkipped,
+            processingReport,
             warningsCount,
             filename,
-            sectionCount,
-            chunkCount,
             status,
           }) => {
             const base =
               status === "processed_with_warnings" || warningsCount > 0
                 ? `Processed ${filename} with warnings`
-                : `Processed ${filename}`;
-            const details = [
-              `${sectionCount} section${sectionCount === 1 ? "" : "s"}`,
-              `${chunkCount} chunk${chunkCount === 1 ? "" : "s"}`,
-              `${nodesCreated} node${nodesCreated === 1 ? "" : "s"}`,
-              `${edgesCreated} edge${edgesCreated === 1 ? "" : "s"}`,
-            ].join(", ");
-            const warningSuffix =
-              warningsCount > 0
-                ? `, ${warningsCount} warning${warningsCount === 1 ? "" : "s"}`
-                : "";
-            setUploadToast(`${base}: ${details}${warningSuffix}.`);
+                : nodesCreated > 0
+                  ? `Processed ${filename}`
+                  : `Saved ${filename}`;
+            const extras: string[] = [];
+            if (nodesCreated > 0) extras.push(`${nodesCreated} node${nodesCreated === 1 ? "" : "s"}`);
+            if (edgesCreated > 0) extras.push(`${edgesCreated} edge${edgesCreated === 1 ? "" : "s"}`);
+            if (existingNodesLinked > 0) extras.push(`${existingNodesLinked} linked`);
+            if (duplicatesSkipped > 0) extras.push(`${duplicatesSkipped} skipped`);
+            const detail = processingReport || (extras.length > 0 ? extras.join(", ") : "");
+            setUploadToast(detail ? `${base}: ${detail}` : base);
             setActiveSheet("documents");
             router.refresh();
-            setTimeout(() => setUploadToast(null), 5000);
+            setTimeout(() => setUploadToast(null), 6000);
           }}
         />
       </BottomSheet>

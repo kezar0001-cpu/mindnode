@@ -55,8 +55,10 @@ function statusStyle(status: string): { label: string; className: string } {
 
 export function DocumentStatusCard({
   document,
+  onSelectNode,
 }: {
   document: SourceDocument;
+  onSelectNode?: (nodeId: string) => void;
 }) {
   const router = useRouter();
   const type = fileLabel(document.mime_type, document.original_filename);
@@ -143,6 +145,17 @@ export function DocumentStatusCard({
             <p className="mt-1.5 line-clamp-2 text-xs text-red-400/80">
               {document.error_message}
             </p>
+          )}
+
+          {/* View in graph button */}
+          {document.document_root_node_id && onSelectNode && !deleteResult && (
+            <button
+              type="button"
+              onClick={() => onSelectNode(document.document_root_node_id!)}
+              className="mt-2 text-[11px] text-teal-400/70 hover:text-teal-300"
+            >
+              View in graph →
+            </button>
           )}
 
           {/* Delete graph controls */}
