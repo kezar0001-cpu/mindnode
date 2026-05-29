@@ -259,6 +259,240 @@ export async function pinGhostSuggestionAction(input: {
   return { success: true, node_id: node.id };
 }
 
+export async function deleteNodeAction(
+  nodeId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const user = await requireUser();
+  const supabase = await createSupabaseServerClient();
+
+  const { data: node } = await supabase
+    .from("nodes")
+    .select("id")
+    .eq("id", nodeId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!node) {
+    return { success: false, error: "Node not found." };
+  }
+
+  // Delete edges connected to this node in both directions.
+  await supabase
+    .from("edges")
+    .delete()
+    .eq("user_id", user.id)
+    .or(`source_node_id.eq.${nodeId},target_node_id.eq.${nodeId}`);
+
+  // Delete memory links before removing the node.
+  await supabase
+    .from("node_memory_links")
+    .delete()
+    .eq("node_id", nodeId)
+    .eq("user_id", user.id);
+
+  const { error } = await supabase
+    .from("nodes")
+    .delete()
+    .eq("id", nodeId)
+    .eq("user_id", user.id);
+
+  if (error) {
+    return { success: false, error: "Could not delete node. Please try again." };
+  }
+
+  revalidatePath("/");
+  return { success: true };
+}
+
+export async function deleteEdgeAction(
+  edgeId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const user = await requireUser();
+  const supabase = await createSupabaseServerClient();
+
+  const { data: edge } = await supabase
+    .from("edges")
+    .select("id")
+    .eq("id", edgeId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!edge) {
+    return { success: false, error: "Connection not found." };
+  }
+
+  const { error } = await supabase
+    .from("edges")
+    .delete()
+    .eq("id", edgeId)
+    .eq("user_id", user.id);
+
+  if (error) {
+    return { success: false, error: "Could not delete connection." };
+  }
+
+  revalidatePath("/");
+  return { success: true };
+}
+
+export async function updateNodeAction(
+  nodeId: string,
+  fields: { title: string; summary: string; category: string },
+): Promise<{ success: boolean; error?: string }> {
+  const user = await requireUser();
+
+  const title = fields.title.trim().slice(0, 120);
+  const summary = fields.summary.trim().slice(0, 2000);
+  const category = (fields.category || "general").trim().slice(0, 40);
+
+  if (!title) {
+    return { success: false, error: "Title cannot be empty." };
+  }
+
+  const supabase = await createSupabaseServerClient();
+
+  const { data: owned } = await supabase
+    .from("nodes")
+    .select("id")
+    .eq("id", nodeId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!owned) {
+    return { success: false, error: "Node not found." };
+  }
+
+  const { error } = await supabase
+    .from("nodes")
+    .update({ title, summary, category })
+    .eq("id", nodeId)
+    .eq("user_id", user.id);
+
+  if (error) {
+    return { success: false, error: "Could not update node. Please try again." };
+  }
+
+  revalidatePath("/");
+  return { success: true };
+}
+
+export async function updateEdgeAction(
+  edgeId: string,
+  relationshipType: string,
+): Promise<{ success: boolean; error?: string }> {
+  const user = await requireUser();
+
+  const relType = relationshipType.trim().slice(0, 40);
+  if (!relType) {
+    return { success: false, error: "Relationship type cannot be empty." };
+  }
+
+  const supabase = await createSupabaseServerClient();
+
+  const { data: owned } = await supabase
+    .from("edges")
+    .select("id")
+    .eq("id", edgeId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!owned) {
+    return { success: false, error: "Connection not found." };
+  }
+
+  const { error } = await supabase
+    .from("edges")
+    .update({ relationship_type: relType })
+    .eq("id", edgeId)
+    .eq("user_id", user.id);
+
+  if (error) {
+    return { success: false, error: "Could not update connection." };
+  }
+
+  revalidatePath("/");
+  return { success: true };
+}
+
+export async function deleteDocumentGraphAction(
+  documentId: string,
+): Promise<{ success: boolean; error?: string; nodesDeleted?: number }> {
+  const user = await requireUser();
+  const supabase = await createSupabaseServerClient();
+
+  const { data: doc } = await supabase
+    .from("source_documents")
+    .select("id, document_root_node_id")
+    .eq("id", documentId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!doc) {
+    return { success: false, error: "Document not found." };
+  }
+
+  // Gather node IDs generated from this document.
+  const { data: docNotes } = await supabase
+    .from("document_notes")
+    .select("node_id")
+    .eq("document_id", documentId);
+
+  const nodeIds = new Set<string>();
+  for (const note of docNotes ?? []) {
+    if (note.node_id) nodeIds.add(note.node_id as string);
+  }
+  if (doc.document_root_node_id) nodeIds.add(doc.document_root_node_id as string);
+
+  const nodeIdList = Array.from(nodeIds);
+
+  if (nodeIdList.length > 0) {
+    // Remove edges where this document's nodes are the source.
+    await supabase
+      .from("edges")
+      .delete()
+      .eq("user_id", user.id)
+      .in("source_node_id", nodeIdList);
+
+    // Remove edges where this document's nodes are the target.
+    await supabase
+      .from("edges")
+      .delete()
+      .eq("user_id", user.id)
+      .in("target_node_id", nodeIdList);
+
+    // Remove memory links.
+    await supabase
+      .from("node_memory_links")
+      .delete()
+      .eq("user_id", user.id)
+      .in("node_id", nodeIdList);
+  }
+
+  // Remove document note entries.
+  await supabase.from("document_notes").delete().eq("document_id", documentId);
+
+  let nodesDeleted = 0;
+  if (nodeIdList.length > 0) {
+    const { data: deleted } = await supabase
+      .from("nodes")
+      .delete()
+      .eq("user_id", user.id)
+      .in("id", nodeIdList)
+      .select("id");
+    nodesDeleted = deleted?.length ?? 0;
+  }
+
+  // Remove the source document record itself.
+  await supabase
+    .from("source_documents")
+    .delete()
+    .eq("id", documentId)
+    .eq("user_id", user.id);
+
+  revalidatePath("/");
+  return { success: true, nodesDeleted };
+}
+
 export async function createEdgeAction(
   sourceNodeId: string,
   targetNodeId: string,

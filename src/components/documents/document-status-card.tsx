@@ -1,6 +1,9 @@
 "use client";
 
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { SourceDocument } from "@/lib/graph/queries";
+import { deleteDocumentGraphAction } from "@/lib/graph/actions";
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -55,6 +58,7 @@ export function DocumentStatusCard({
 }: {
   document: SourceDocument;
 }) {
+  const router = useRouter();
   const type = fileLabel(document.mime_type, document.original_filename);
   const status = statusStyle(document.status);
   const hasCounts =
@@ -62,6 +66,40 @@ export function DocumentStatusCard({
     document.chunk_count > 0 ||
     document.nodes_created > 0 ||
     document.edges_created > 0;
+
+  const canDelete =
+    document.status === "processed" ||
+    document.status === "processed_with_warnings" ||
+    document.status === "failed";
+
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteResult, setDeleteResult] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const handleDelete = () => {
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
+    }
+    setDeleteError(null);
+    startTransition(async () => {
+      const result = await deleteDocumentGraphAction(document.id);
+      if (!result.success) {
+        setDeleteError(result.error ?? "Could not delete document graph.");
+        setConfirmDelete(false);
+        return;
+      }
+      const count = result.nodesDeleted ?? 0;
+      setDeleteResult(
+        count === 0
+          ? "Graph removed."
+          : `Removed ${count} node${count === 1 ? "" : "s"} from graph.`,
+      );
+      router.refresh();
+    });
+  };
+
   return (
     <div className="rounded-lg border border-canvas-border bg-canvas-bg p-3">
       <div className="flex items-start justify-between gap-3">
@@ -105,6 +143,53 @@ export function DocumentStatusCard({
             <p className="mt-1.5 line-clamp-2 text-xs text-red-400/80">
               {document.error_message}
             </p>
+          )}
+
+          {/* Delete graph controls */}
+          {canDelete && !deleteResult && (
+            <div className="mt-2">
+              {deleteError && (
+                <p className="mb-1 text-xs text-red-400">{deleteError}</p>
+              )}
+              {confirmDelete ? (
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-red-400">
+                    Remove{" "}
+                    {document.nodes_created > 0
+                      ? `${document.nodes_created} node${document.nodes_created === 1 ? "" : "s"} and `
+                      : ""}
+                    this document?
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(false)}
+                    className="text-xs text-neutral-500 hover:text-neutral-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    disabled={isPending}
+                    className="rounded bg-red-900/60 px-2 py-0.5 text-xs font-medium text-red-300 hover:bg-red-900/80 disabled:opacity-40"
+                  >
+                    {isPending ? "Removing…" : "Confirm"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  className="text-[11px] text-red-500/60 hover:text-red-400"
+                >
+                  Delete generated graph
+                </button>
+              )}
+            </div>
+          )}
+
+          {deleteResult && (
+            <p className="mt-2 text-xs text-emerald-400">{deleteResult}</p>
           )}
         </div>
         <span
