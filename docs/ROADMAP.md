@@ -75,6 +75,38 @@ Staged plan. Each stage should land in small commits and be usable end-to-end be
 - UI: header Documents button → list + upload sheet; node-detail shows
   Document origin badge with source filename and quoted excerpt.
 
+## Stage 7 — Document graph extraction (in progress)
+
+- Migration `20260530010000_document_graph_redesign.sql`: adds
+  `document_root` / `document_section` to `nodes.origin`, `document_ai` /
+  `document_structure` to `edges.origin`, `processed_with_warnings` status,
+  `document_sections` table, `document_chunks.section_*` metadata,
+  diagnostics + warnings columns on `source_documents`, node_type / tags /
+  importance / stable_key on `document_notes`.
+- Section parser (`src/lib/documents/structure.ts`) detects Markdown
+  ATX/Setext, ALL-CAPS, and Title-Case headings.
+- Section-aware chunker (`src/lib/documents/chunk.ts`) preserves section
+  boundaries; chunks carry section metadata; hard cap raised to 60.
+- Model router (`src/lib/ai/models.ts`, `router.ts`) with `AI_MODEL_*` env
+  vars per task and sensible defaults.
+- `chatCompletionStructured` in `provider.ts` uses OpenAI Structured
+  Outputs (`json_schema`, strict) at a lower temperature for extraction.
+- Two-pass processor (`src/lib/documents/process.ts`):
+  Pass 1 creates the document root + section nodes with `contains` edges;
+  Pass 2 calls graph extraction per section with retry, creates typed
+  child nodes (`node_type`, `importance`, `tags`, `stable_key`,
+  `source_excerpt`) and typed semantic relationships.
+- Similarity helper (`src/lib/graph/similarity.ts`) replaces the
+  `same_document` chain with conservative `relates_to` links to existing
+  graph nodes (≥2 shared meaningful tokens, or 1 + category match).
+- Cluster layout (`src/lib/documents/layout.ts`) places root at centroid,
+  sections radially, children fanned away from the root.
+- Quality guard: low-yield uploads marked `processed_with_warnings`;
+  diagnostics stored on the source document.
+- UI: stage cycler in upload sheet; document status card shows
+  section/chunk/node/edge counts and warnings; node detail shows
+  `node_type` pill and section title for any document-origin node.
+
 ## Later (not scheduled)
 
 - OCR for image-only PDFs.

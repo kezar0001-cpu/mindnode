@@ -24,8 +24,16 @@ export type NodeOrigin =
   | "memory"
   | "ai_pinned"
   | "imported"
-  | "document_ai";
-export type EdgeOrigin = "manual" | "auto_keyword" | "ai_pinned" | "ai_suggested";
+  | "document_ai"
+  | "document_root"
+  | "document_section";
+export type EdgeOrigin =
+  | "manual"
+  | "auto_keyword"
+  | "ai_pinned"
+  | "ai_suggested"
+  | "document_ai"
+  | "document_structure";
 
 export type DocumentStatus =
   | "uploaded"
@@ -33,6 +41,7 @@ export type DocumentStatus =
   | "extracted"
   | "processing"
   | "processed"
+  | "processed_with_warnings"
   | "failed";
 
 export interface GraphNode {

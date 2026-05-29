@@ -1,11 +1,20 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+type UploadStage =
+  | "idle"
+  | "uploading"
+  | "extracting"
+  | "reading"
+  | "graph"
+  | "done"
+  | "error";
 
 type UploadState =
   | { status: "idle" }
-  | { status: "uploading" }
-  | { status: "success"; message: string }
+  | { status: "working"; stage: Exclude<UploadStage, "idle" | "done" | "error"> }
+  | { status: "success"; message: string; warnings: number }
   | { status: "error"; message: string };
 
 const ACCEPT =
@@ -18,7 +27,23 @@ type UploadResponse = {
   ok: boolean;
   document_id?: string;
   notes_created?: number;
+  section_count?: number;
+  chunk_count?: number;
+  nodes_created?: number;
+  edges_created?: number;
+  warnings_count?: number;
+  status?: string;
   error?: string;
+};
+
+const STAGE_LABEL: Record<
+  Exclude<UploadStage, "idle" | "done" | "error">,
+  string
+> = {
+  uploading: "Uploading…",
+  extracting: "Extracting text…",
+  reading: "Reading sections…",
+  graph: "Building graph…",
 };
 
 export function DocumentUploadSheet({
@@ -26,14 +51,43 @@ export function DocumentUploadSheet({
 }: {
   onSuccess?: (result: {
     documentId: string;
-    notesCreated: number;
+    nodesCreated: number;
+    edgesCreated: number;
+    warningsCount: number;
     filename: string;
   }) => void;
 }) {
   const [state, setState] = useState<UploadState>({ status: "idle" });
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const isWorking = state.status === "uploading";
+  const isWorking = state.status === "working";
+
+  // Stage cycler — advance the visible label while the upload is in flight.
+  useEffect(() => {
+    if (state.status !== "working") return;
+    const stages: Exclude<UploadStage, "idle" | "done" | "error">[] = [
+      "uploading",
+      "extracting",
+      "reading",
+      "graph",
+    ];
+    const delays = [1500, 2500, 3000];
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    let idx = stages.indexOf(state.stage);
+    let totalDelay = 0;
+    for (let i = idx; i < stages.length - 1; i++) {
+      totalDelay += delays[i];
+      const next = stages[i + 1];
+      timers.push(
+        setTimeout(() => {
+          setState((s) => (s.status === "working" ? { status: "working", stage: next } : s));
+        }, totalDelay),
+      );
+    }
+    return () => {
+      for (const t of timers) clearTimeout(t);
+    };
+  }, [state]);
 
   async function handleUpload(file: File) {
     if (file.size > MAX_BYTES) {
@@ -41,7 +95,7 @@ export function DocumentUploadSheet({
       return;
     }
 
-    setState({ status: "uploading" });
+    setState({ status: "working", stage: "uploading" });
 
     const formData = new FormData();
     formData.append("file", file);
@@ -53,10 +107,7 @@ export function DocumentUploadSheet({
         body: formData,
       });
     } catch {
-      setState({
-        status: "error",
-        message: "Network error. Please try again.",
-      });
+      setState({ status: "error", message: "Network error. Please try again." });
       return;
     }
 
@@ -79,17 +130,19 @@ export function DocumentUploadSheet({
       return;
     }
 
-    const notesCreated = body.notes_created ?? 0;
-    setState({
-      status: "success",
-      message:
-        notesCreated > 0
-          ? `Added ${notesCreated} note${notesCreated === 1 ? "" : "s"} from ${file.name}`
-          : `Saved ${file.name}, but no notes were created.`,
-    });
+    const nodesCreated = body.nodes_created ?? 0;
+    const edgesCreated = body.edges_created ?? 0;
+    const warningsCount = body.warnings_count ?? 0;
+    const message =
+      nodesCreated > 0
+        ? `Added ${nodesCreated} node${nodesCreated === 1 ? "" : "s"} and ${edgesCreated} connection${edgesCreated === 1 ? "" : "s"} from ${file.name}`
+        : `Saved ${file.name}, but no nodes were created.`;
+    setState({ status: "success", message, warnings: warningsCount });
     onSuccess?.({
       documentId: body.document_id ?? "",
-      notesCreated,
+      nodesCreated,
+      edgesCreated,
+      warningsCount,
       filename: file.name,
     });
     if (inputRef.current) inputRef.current.value = "";
@@ -98,8 +151,8 @@ export function DocumentUploadSheet({
   return (
     <div className="space-y-3">
       <p className="text-xs leading-relaxed text-neutral-400">
-        Upload a .txt, .md, .pdf, or .docx file. The AI reads it and adds new
-        notes to your graph. Limit: 10MB.
+        Upload a .txt, .md, .pdf, or .docx file. The AI reads it section by
+        section and turns it into a knowledge graph. Limit: 10MB.
       </p>
 
       <label
@@ -123,7 +176,7 @@ export function DocumentUploadSheet({
           />
         </svg>
         <span className="text-sm font-medium text-neutral-200">
-          {isWorking ? "Uploading and processing…" : "Choose a file"}
+          {isWorking ? STAGE_LABEL[state.stage] : "Choose a file"}
         </span>
         <span className="text-xs text-neutral-500">
           .txt · .md · .pdf · .docx
@@ -142,15 +195,22 @@ export function DocumentUploadSheet({
       </label>
 
       {isWorking && (
-        <p className="text-xs text-neutral-400">
-          Uploading… this can take 30 seconds for large files.
-        </p>
+        <div className="flex items-center gap-2 text-xs text-neutral-400">
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-neutral-600 border-t-teal-300" />
+          <span>{STAGE_LABEL[state.stage]} this can take 30 to 60 seconds for large files.</span>
+        </div>
       )}
 
       {state.status === "success" && (
-        <p className="rounded-md border border-emerald-500/30 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
-          {state.message}
-        </p>
+        <div className="rounded-md border border-emerald-500/30 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
+          <p>{state.message}</p>
+          {state.warnings > 0 && (
+            <p className="mt-1 text-amber-300/90">
+              {state.warnings} warning{state.warnings === 1 ? "" : "s"} during
+              processing.
+            </p>
+          )}
+        </div>
       )}
 
       {state.status === "error" && (

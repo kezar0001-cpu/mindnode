@@ -977,16 +977,19 @@ export function MindWorkspace({
         title="Upload document"
       >
         <DocumentUploadSheet
-          onSuccess={({ notesCreated, filename }) => {
-            setUploadToast(
-              notesCreated > 0
-                ? `Added ${notesCreated} note${notesCreated === 1 ? "" : "s"} from ${filename}`
-                : `Saved ${filename}.`,
-            );
+          onSuccess={({ nodesCreated, edgesCreated, warningsCount, filename }) => {
+            const base =
+              nodesCreated > 0
+                ? `Added ${nodesCreated} node${nodesCreated === 1 ? "" : "s"} and ${edgesCreated} connection${edgesCreated === 1 ? "" : "s"} from ${filename}`
+                : `Saved ${filename}.`;
+            const withWarnings =
+              warningsCount > 0
+                ? `${base} (${warningsCount} warning${warningsCount === 1 ? "" : "s"})`
+                : base;
+            setUploadToast(withWarnings);
             setActiveSheet("documents");
             router.refresh();
-            // Auto-dismiss the toast after a beat.
-            setTimeout(() => setUploadToast(null), 4000);
+            setTimeout(() => setUploadToast(null), 5000);
           }}
         />
       </BottomSheet>

@@ -24,7 +24,10 @@ function formatTimestamp(iso: string): string {
 // Origin badge helpers.
 function OriginBadge({ origin }: { origin: string }) {
   const isAiPinned = origin === "ai_pinned";
-  const isDocument = origin === "document_ai";
+  const isDocument =
+    origin === "document_ai" ||
+    origin === "document_root" ||
+    origin === "document_section";
   const label =
     origin === "memory"
       ? "From memory"
@@ -36,6 +39,10 @@ function OriginBadge({ origin }: { origin: string }) {
       ? "Imported"
       : origin === "document_ai"
       ? "Document"
+      : origin === "document_root"
+      ? "Document root"
+      : origin === "document_section"
+      ? "Section"
       : origin;
 
   return (
@@ -50,6 +57,14 @@ function OriginBadge({ origin }: { origin: string }) {
       ].join(" ")}
     >
       {label}
+    </span>
+  );
+}
+
+function NodeTypePill({ nodeType }: { nodeType: string }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-violet-400/40 bg-violet-950/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-violet-200">
+      {nodeType}
     </span>
   );
 }
@@ -158,10 +173,15 @@ export function NodeDetail({
             </span>
           )}
         </div>
-        {/* Origin badge */}
+        {/* Origin badge + optional node_type pill from document_notes */}
         {node.origin && (
-          <div className="mt-1.5">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <OriginBadge origin={node.origin as NodeOrigin} />
+            {nodeDocumentSources?.[node.id]?.node_type && (
+              <NodeTypePill
+                nodeType={nodeDocumentSources[node.id].node_type as string}
+              />
+            )}
           </div>
         )}
       </div>
@@ -187,27 +207,50 @@ export function NodeDetail({
         </div>
       )}
 
-      {/* Document source — only for document_ai nodes */}
-      {node.origin === "document_ai" && nodeDocumentSources?.[node.id] && (
-        <div className="rounded-lg border border-dashed border-blue-400/40 bg-blue-950/15 p-3">
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-blue-300/70">
-            Source
-          </p>
-          <p className="text-xs text-blue-100/80">
-            From {nodeDocumentSources[node.id].original_filename}
-          </p>
-          {nodeDocumentSources[node.id].source_excerpt && (
-            <blockquote className="mt-2 border-l-2 border-blue-400/40 pl-2 text-xs italic leading-relaxed text-blue-100/70">
-              &ldquo;{nodeDocumentSources[node.id].source_excerpt}&rdquo;
-            </blockquote>
-          )}
-          {node.ai_reason && (
-            <p className="mt-2 text-[11px] leading-relaxed text-blue-100/60">
+      {/* Document source — any document-origin node */}
+      {(node.origin === "document_ai" ||
+        node.origin === "document_root" ||
+        node.origin === "document_section") &&
+        nodeDocumentSources?.[node.id] && (
+          <div className="rounded-lg border border-dashed border-blue-400/40 bg-blue-950/15 p-3">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-blue-300/70">
+              Source
+            </p>
+            <p className="text-xs text-blue-100/80">
+              From {nodeDocumentSources[node.id].original_filename}
+            </p>
+            {nodeDocumentSources[node.id].source_section_title && (
+              <p className="mt-0.5 text-[11px] text-blue-100/70">
+                Section: {nodeDocumentSources[node.id].source_section_title}
+              </p>
+            )}
+            {nodeDocumentSources[node.id].source_excerpt && (
+              <blockquote className="mt-2 border-l-2 border-blue-400/40 pl-2 text-xs italic leading-relaxed text-blue-100/70">
+                &ldquo;{nodeDocumentSources[node.id].source_excerpt}&rdquo;
+              </blockquote>
+            )}
+            {node.ai_reason && (
+              <p className="mt-2 text-[11px] leading-relaxed text-blue-100/60">
+                {node.ai_reason}
+              </p>
+            )}
+          </div>
+        )}
+
+      {/* For document_root or document_section without an excerpt, still
+          show the ai_reason so the user understands the role. */}
+      {(node.origin === "document_root" || node.origin === "document_section") &&
+        !nodeDocumentSources?.[node.id] &&
+        node.ai_reason && (
+          <div className="rounded-lg border border-dashed border-blue-400/40 bg-blue-950/15 p-3">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-blue-300/70">
+              About this node
+            </p>
+            <p className="text-xs leading-relaxed text-blue-100/80">
               {node.ai_reason}
             </p>
-          )}
-        </div>
-      )}
+          </div>
+        )}
 
       {/* Memory trail — raw entries that built this node */}
       {trail.length > 0 ? (

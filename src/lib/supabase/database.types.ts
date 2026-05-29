@@ -208,12 +208,19 @@ export interface Database {
           mime_type: string;
           file_size_bytes: number;
           storage_path: string;
-          // "uploaded" | "extracting" | "extracted" | "processing" | "processed" | "failed"
+          // "uploaded" | "extracting" | "extracted" | "processing" | "processed" | "processed_with_warnings" | "failed"
           status: string;
           error_message: string | null;
           extracted_text: string | null;
           text_char_count: number | null;
           metadata: Json;
+          document_root_node_id: string | null;
+          section_count: number;
+          chunk_count: number;
+          nodes_created: number;
+          edges_created: number;
+          diagnostics: Json;
+          warnings: Json;
           created_at: string;
           updated_at: string;
         };
@@ -230,6 +237,13 @@ export interface Database {
           extracted_text?: string | null;
           text_char_count?: number | null;
           metadata?: Json;
+          document_root_node_id?: string | null;
+          section_count?: number;
+          chunk_count?: number;
+          nodes_created?: number;
+          edges_created?: number;
+          diagnostics?: Json;
+          warnings?: Json;
           created_at?: string;
           updated_at?: string;
         };
@@ -246,6 +260,13 @@ export interface Database {
           extracted_text?: string | null;
           text_char_count?: number | null;
           metadata?: Json;
+          document_root_node_id?: string | null;
+          section_count?: number;
+          chunk_count?: number;
+          nodes_created?: number;
+          edges_created?: number;
+          diagnostics?: Json;
+          warnings?: Json;
           created_at?: string;
           updated_at?: string;
         };
@@ -267,6 +288,10 @@ export interface Database {
           content: string;
           token_estimate: number | null;
           metadata: Json;
+          section_id: string | null;
+          section_title: string | null;
+          section_level: number | null;
+          section_index: number | null;
           created_at: string;
         };
         Insert: {
@@ -277,6 +302,10 @@ export interface Database {
           content: string;
           token_estimate?: number | null;
           metadata?: Json;
+          section_id?: string | null;
+          section_title?: string | null;
+          section_level?: number | null;
+          section_index?: number | null;
           created_at?: string;
         };
         Update: {
@@ -287,6 +316,10 @@ export interface Database {
           content?: string;
           token_estimate?: number | null;
           metadata?: Json;
+          section_id?: string | null;
+          section_title?: string | null;
+          section_level?: number | null;
+          section_index?: number | null;
           created_at?: string;
         };
         Relationships: [
@@ -298,6 +331,73 @@ export interface Database {
           },
           {
             foreignKeyName: "document_chunks_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      document_sections: {
+        Row: {
+          id: string;
+          user_id: string;
+          document_id: string;
+          section_index: number;
+          title: string;
+          level: number;
+          char_count: number;
+          word_count: number;
+          start_offset: number | null;
+          end_offset: number | null;
+          node_id: string | null;
+          summary: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          document_id: string;
+          section_index: number;
+          title: string;
+          level?: number;
+          char_count?: number;
+          word_count?: number;
+          start_offset?: number | null;
+          end_offset?: number | null;
+          node_id?: string | null;
+          summary?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          document_id?: string;
+          section_index?: number;
+          title?: string;
+          level?: number;
+          char_count?: number;
+          word_count?: number;
+          start_offset?: number | null;
+          end_offset?: number | null;
+          node_id?: string | null;
+          summary?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_sections_document_id_fkey";
+            columns: ["document_id"];
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "document_sections_node_id_fkey";
+            columns: ["node_id"];
+            referencedRelation: "nodes";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "document_sections_user_id_fkey";
             columns: ["user_id"];
             referencedRelation: "users";
             referencedColumns: ["id"];
@@ -317,6 +417,11 @@ export interface Database {
           source_excerpt: string | null;
           confidence: number | null;
           metadata: Json;
+          node_type: string | null;
+          source_section_title: string | null;
+          importance: number | null;
+          stable_key: string | null;
+          tags: string[] | null;
           created_at: string;
         };
         Insert: {
@@ -331,6 +436,11 @@ export interface Database {
           source_excerpt?: string | null;
           confidence?: number | null;
           metadata?: Json;
+          node_type?: string | null;
+          source_section_title?: string | null;
+          importance?: number | null;
+          stable_key?: string | null;
+          tags?: string[] | null;
           created_at?: string;
         };
         Update: {
@@ -345,6 +455,11 @@ export interface Database {
           source_excerpt?: string | null;
           confidence?: number | null;
           metadata?: Json;
+          node_type?: string | null;
+          source_section_title?: string | null;
+          importance?: number | null;
+          stable_key?: string | null;
+          tags?: string[] | null;
           created_at?: string;
         };
         Relationships: [

@@ -22,8 +22,12 @@ function statusStyle(status: string): { label: string; className: string } {
     case "processed":
       return {
         label: "Processed",
-        className:
-          "border-emerald-500/40 bg-emerald-950/30 text-emerald-200",
+        className: "border-emerald-500/40 bg-emerald-950/30 text-emerald-200",
+      };
+    case "processed_with_warnings":
+      return {
+        label: "Warnings",
+        className: "border-amber-500/40 bg-amber-950/30 text-amber-200",
       };
     case "failed":
       return {
@@ -53,6 +57,11 @@ export function DocumentStatusCard({
 }) {
   const type = fileLabel(document.mime_type, document.original_filename);
   const status = statusStyle(document.status);
+  const hasCounts =
+    document.section_count > 0 ||
+    document.chunk_count > 0 ||
+    document.nodes_created > 0 ||
+    document.edges_created > 0;
   return (
     <div className="rounded-lg border border-canvas-border bg-canvas-bg p-3">
       <div className="flex items-start justify-between gap-3">
@@ -65,13 +74,31 @@ export function DocumentStatusCard({
               {document.original_filename}
             </p>
           </div>
-          <p className="mt-1.5 text-xs text-neutral-500">
-            {document.notes_created > 0
-              ? `${document.notes_created} note${document.notes_created === 1 ? "" : "s"}`
-              : document.status === "failed"
-                ? "No notes"
-                : "Awaiting AI…"}
-            <span className="mx-1 text-neutral-700">·</span>
+          {hasCounts ? (
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-neutral-500">
+              <span>{document.section_count} sections</span>
+              <span className="text-neutral-700">·</span>
+              <span>{document.chunk_count} chunks</span>
+              <span className="text-neutral-700">·</span>
+              <span>{document.nodes_created} nodes</span>
+              <span className="text-neutral-700">·</span>
+              <span>{document.edges_created} edges</span>
+              {document.warnings_count > 0 && (
+                <>
+                  <span className="text-neutral-700">·</span>
+                  <span className="rounded-full border border-amber-500/40 bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-medium text-amber-200">
+                    {document.warnings_count} warning
+                    {document.warnings_count === 1 ? "" : "s"}
+                  </span>
+                </>
+              )}
+            </div>
+          ) : (
+            <p className="mt-1.5 text-xs text-neutral-500">
+              {document.status === "failed" ? "No notes" : "Awaiting AI…"}
+            </p>
+          )}
+          <p className="mt-1 text-[11px] text-neutral-600">
             {dateFormatter.format(new Date(document.created_at))}
           </p>
           {document.status === "failed" && document.error_message && (
