@@ -6,12 +6,20 @@ export type GhostNodeData = Record<string, unknown> & {
   title: string;
   category: string;
   reason: string;
+  confidence: number;
   onExplore: () => void;
   onPin: () => void;
   onDismiss: () => void;
 };
 
+function confidenceDotColour(confidence: number): string {
+  if (confidence >= 0.7) return "#4ade80"; // green
+  if (confidence >= 0.5) return "#fbbf24"; // amber
+  return "#94a3b8"; // slate
+}
+
 export function GhostNodeComponent({ data, selected }: NodeProps<Node<GhostNodeData>>) {
+  const dotColour = confidenceDotColour(data.confidence ?? 0);
   return (
     <>
       <Handle type="target" position={Position.Left} style={{ opacity: 0, width: 6, height: 6, border: "none" }} />
@@ -23,7 +31,17 @@ export function GhostNodeComponent({ data, selected }: NodeProps<Node<GhostNodeD
             : "border-purple-400/60 bg-purple-950/20 opacity-90",
         ].join(" ")}
       >
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-purple-300/80">
+        <p className="mb-1 flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-purple-300/80">
+          <span
+            style={{
+              display: "inline-block",
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              background: dotColour,
+              flexShrink: 0,
+            }}
+          />
           AI · {data.category}
         </p>
         <p className="line-clamp-2 text-xs font-medium leading-snug text-purple-100">

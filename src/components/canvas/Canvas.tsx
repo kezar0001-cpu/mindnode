@@ -20,6 +20,7 @@ import "@xyflow/react/dist/style.css";
 
 import { updateNodePositionAction } from "@/lib/graph/actions";
 import { GhostNodeComponent, type GhostNodeData } from "@/components/nodes/ghost-node";
+import { categoryColour } from "@/lib/graph/insights";
 import type { GraphNode, GraphEdge } from "@/types";
 
 type MindNodeData = Record<string, unknown> & {
@@ -27,6 +28,9 @@ type MindNodeData = Record<string, unknown> & {
   focused?: boolean;
   connected?: boolean;
   dimmed?: boolean;
+  categoryStroke: string;
+  categoryGlow: string;
+  categoryBg: string;
 };
 
 export type GhostAnchorType = "real_node" | "ghost_node" | "graph";
@@ -51,6 +55,22 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
   const focused = data.focused || selected;
   const connected = data.connected;
   const dimmed = data.dimmed;
+
+  // Focused/selected state dominates — overrides to white-ish border + scale.
+  // Connected state uses category accent ring.
+  // Default uses category stroke at low opacity.
+  const borderStyle = focused
+    ? undefined
+    : { borderColor: connected ? data.categoryStroke : `${data.categoryStroke}44` };
+  const bgStyle = focused
+    ? undefined
+    : { backgroundColor: data.categoryBg };
+  const boxShadow = focused
+    ? undefined
+    : connected
+    ? `0 0 10px ${data.categoryGlow}, 0 2px 8px rgba(0,0,0,0.4)`
+    : `0 0 6px ${data.categoryGlow}, 0 1px 4px rgba(0,0,0,0.3)`;
+
   return (
     <>
       <Handle
@@ -64,10 +84,11 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
           focused
             ? "border-teal-300 bg-neutral-800 shadow-lg shadow-teal-500/20 scale-105"
             : connected
-            ? "border-teal-300/40 bg-canvas-surface shadow-md shadow-teal-500/10"
-            : "border-canvas-border bg-canvas-surface shadow-sm",
+            ? "shadow-md"
+            : "shadow-sm",
           dimmed ? "opacity-50" : "opacity-100",
         ].join(" ")}
+        style={focused ? undefined : { ...borderStyle, ...bgStyle, boxShadow }}
       >
         <p
           className={[
@@ -90,12 +111,20 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
 const nodeTypes = { mindNode: MindNodeComponent, ghostNode: GhostNodeComponent };
 
 function toFlowNodes(dbNodes: GraphNode[]): Node<MindNodeData>[] {
-  return dbNodes.map((n) => ({
-    id: n.id,
-    type: "mindNode",
-    position: { x: n.position_x, y: n.position_y },
-    data: { label: n.title },
-  }));
+  return dbNodes.map((n) => {
+    const colours = categoryColour(n.category || "general");
+    return {
+      id: n.id,
+      type: "mindNode",
+      position: { x: n.position_x, y: n.position_y },
+      data: {
+        label: n.title,
+        categoryStroke: colours.stroke,
+        categoryGlow: colours.glow,
+        categoryBg: colours.bg,
+      },
+    };
+  });
 }
 
 type CanvasProps = {
@@ -134,12 +163,26 @@ export function Canvas({
     return s;
   }, [dbEdges, selectedNodeId]);
 
+  // Build a quick lookup for source node category colour.
+  const nodeColourMap = useMemo<Map<string, { stroke: string; glow: string; bg: string }>>(() => {
+    const m = new Map<string, { stroke: string; glow: string; bg: string }>();
+    for (const n of dbNodes) {
+      m.set(n.id, categoryColour(n.category || "general"));
+    }
+    return m;
+  }, [dbNodes]);
+
   const styledEdges = useMemo<Edge[]>(() => {
     return dbEdges.map((e) => {
       const touchesSelected =
         selectedNodeId !== null &&
         (e.source_node_id === selectedNodeId || e.target_node_id === selectedNodeId);
       const dimmed = selectedNodeId !== null && !touchesSelected;
+      // Strength-based width, capped at 3.
+      const width = Math.min(1 + (typeof e.strength === "number" ? e.strength : 1), 3);
+      // Category tint from source node at low opacity when not focused.
+      const sourceCat = nodeColourMap.get(e.source_node_id);
+      const categoryStroke = sourceCat ? sourceCat.stroke : "#3a3f4b";
       return {
         id: e.id,
         source: e.source_node_id,
@@ -148,8 +191,8 @@ export function Canvas({
         type: "default",
         animated: touchesSelected,
         style: {
-          stroke: touchesSelected ? "#5eead4" : "#3a3f4b",
-          strokeWidth: touchesSelected ? 2 : 1,
+          stroke: touchesSelected ? "#5eead4" : `${categoryStroke}55`,
+          strokeWidth: touchesSelected ? Math.max(width, 2) : width,
           opacity: dimmed ? 0.25 : 1,
         },
         labelStyle: {
@@ -160,7 +203,7 @@ export function Canvas({
         labelBgStyle: { fill: "#0f1115" },
       };
     });
-  }, [dbEdges, selectedNodeId]);
+  }, [dbEdges, selectedNodeId, nodeColourMap]);
 
   const ghostFlowNodes = useMemo<Node<GhostNodeData>[]>(() => {
     return ghostSuggestions.map((g) => ({
@@ -172,6 +215,7 @@ export function Canvas({
         title: g.title,
         category: g.category,
         reason: g.reason,
+        confidence: g.confidence,
         onExplore: () => onGhostExplore(g.id),
         onPin: () => onGhostPin(g.id),
         onDismiss: () => onGhostDismiss(g.id),
@@ -200,8 +244,9 @@ export function Canvas({
         style: {
           stroke: "#a78bfa",
           strokeWidth: 1,
-          strokeDasharray: "4 4",
+          strokeDasharray: "5 3",
           opacity: 0.7,
+          filter: "drop-shadow(0 0 3px rgba(167,139,250,0.4))",
         },
       });
     }
@@ -278,6 +323,34 @@ export function Canvas({
             MindNode will map it on the canvas and branch related avenues
             around it as your graph grows.
           </p>
+          {/* Arrow pointing to FAB at bottom-right */}
+          <div className="mt-6 flex justify-end pr-2">
+            <svg
+              width="48"
+              height="48"
+              viewBox="0 0 48 48"
+              fill="none"
+              className="text-neutral-600"
+              aria-hidden="true"
+            >
+              <path
+                d="M8 8 C 16 8, 40 8, 40 36"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeDasharray="4 3"
+                strokeLinecap="round"
+                fill="none"
+              />
+              <path
+                d="M34 30 L40 36 L46 30"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+              />
+            </svg>
+          </div>
         </div>
       </div>
     );

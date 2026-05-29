@@ -57,6 +57,8 @@ export interface Database {
           category: string;
           position_x: number;
           position_y: number;
+          origin: string;
+          ai_reason: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -68,6 +70,8 @@ export interface Database {
           category?: string;
           position_x?: number;
           position_y?: number;
+          origin?: string;
+          ai_reason?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -79,6 +83,8 @@ export interface Database {
           category?: string;
           position_x?: number;
           position_y?: number;
+          origin?: string;
+          ai_reason?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -100,6 +106,7 @@ export interface Database {
           relationship_type: string;
           label: string | null;
           strength: number;
+          origin: string;
           created_at: string;
         };
         Insert: {
@@ -110,6 +117,7 @@ export interface Database {
           relationship_type?: string;
           label?: string | null;
           strength?: number;
+          origin?: string;
           created_at?: string;
         };
         Update: {
@@ -120,6 +128,7 @@ export interface Database {
           relationship_type?: string;
           label?: string | null;
           strength?: number;
+          origin?: string;
           created_at?: string;
         };
         Relationships: [
