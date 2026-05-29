@@ -19,8 +19,21 @@ export interface MemoryEntry {
   created_at: ISODateString;
 }
 
-export type NodeOrigin = "manual" | "memory" | "ai_pinned" | "imported";
+export type NodeOrigin =
+  | "manual"
+  | "memory"
+  | "ai_pinned"
+  | "imported"
+  | "document_ai";
 export type EdgeOrigin = "manual" | "auto_keyword" | "ai_pinned" | "ai_suggested";
+
+export type DocumentStatus =
+  | "uploaded"
+  | "extracting"
+  | "extracted"
+  | "processing"
+  | "processed"
+  | "failed";
 
 export interface GraphNode {
   id: UUID;

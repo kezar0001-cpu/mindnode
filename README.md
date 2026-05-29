@@ -51,10 +51,27 @@ It is part:
 
 The app shell is mobile-first. On phones (the primary target) `/` is a single-column stack — header, thought input, canvas, node detail. From the `lg` breakpoint (≥1024px) the three regions sit side by side. Inputs use a ≥16px font so iOS Safari doesn't zoom on focus, and the root uses `min-h-dvh` to play nicely with the changing viewport when the Safari address bar shows or hides.
 
+## Document ingestion
+
+You can upload a `.txt`, `.md`, `.pdf` (text-based) or `.docx` file and the AI
+will extract structured notes that become new nodes on your canvas.
+
+- **Supported types**: `.txt`, `.md`, `.pdf` (text-based, no OCR yet), `.docx`.
+  `.doc` is not supported — please convert to `.docx` first.
+- **Limits**: 10MB per file; up to 250,000 characters of extracted text; up
+  to 30 chunks of ~1,500 words each.
+- **Storage**: files land in the `mindnode-documents` Supabase Storage bucket.
+  The migration creates this bucket as **private**. If you create it manually
+  in the Supabase dashboard, make sure the bucket is **not** public.
+- **Provenance**: each generated node carries `origin = 'document_ai'` and
+  stores its source filename plus a literal excerpt from the chunk it came
+  from. Same-document nodes are auto-linked with a `same_document` edge.
+
 ## Status
 
 - Auth + RLS in place (every row of every table belongs to a single user; per-user CRUD policies).
 - Raw thought capture and persistence in place. Signed-in users can write a thought, submit it via a server action, and see their 20 most-recent entries below the form. Each entry is stored in `memory_entries` with `source: "manual"`.
+- Document ingestion (txt/md/pdf/docx → chunks → AI notes → nodes/edges) in place.
 - AI suggestion pipeline, React Flow canvas, node detail content: not yet started.
 
 ## Local Development

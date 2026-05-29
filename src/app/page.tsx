@@ -5,8 +5,10 @@ import {
 } from "@/lib/memory/queries";
 import {
   listEdges,
+  listNodeDocumentSources,
   listNodeMemoryTrails,
   listNodes,
+  listSourceDocuments,
 } from "@/lib/graph/queries";
 import { requireUser } from "@/lib/supabase/auth";
 
@@ -16,14 +18,20 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const user = await requireUser();
 
-  const [recent, nodes, edges, promotedMemoryIds] = await Promise.all([
-    listRecentMemoryEntries(20),
-    listNodes(),
-    listEdges(),
-    listPromotedMemoryIds(),
-  ]);
+  const [recent, nodes, edges, promotedMemoryIds, sourceDocuments] =
+    await Promise.all([
+      listRecentMemoryEntries(20),
+      listNodes(),
+      listEdges(),
+      listPromotedMemoryIds(),
+      listSourceDocuments(),
+    ]);
 
-  const memoryTrails = await listNodeMemoryTrails(nodes.map((n) => n.id));
+  const nodeIds = nodes.map((n) => n.id);
+  const [memoryTrails, nodeDocumentSources] = await Promise.all([
+    listNodeMemoryTrails(nodeIds),
+    listNodeDocumentSources(nodeIds),
+  ]);
 
   return (
     <MindWorkspace
@@ -32,6 +40,8 @@ export default async function HomePage() {
       memoryTrails={memoryTrails}
       recentEntries={recent}
       promotedMemoryIds={promotedMemoryIds}
+      sourceDocuments={sourceDocuments}
+      nodeDocumentSources={nodeDocumentSources}
       userEmail={user.email ?? ""}
     />
   );
