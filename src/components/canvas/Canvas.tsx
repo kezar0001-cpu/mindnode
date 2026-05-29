@@ -19,23 +19,38 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { updateNodePositionAction } from "@/lib/graph/actions";
-import type { GraphNode, GraphEdge, GhostSuggestionNode } from "@/types";
+import { GhostNodeComponent, type GhostNodeData } from "@/components/nodes/ghost-node";
+import type { GraphNode, GraphEdge } from "@/types";
 
 type MindNodeData = Record<string, unknown> & {
   label: string;
   focused?: boolean;
   connected?: boolean;
   dimmed?: boolean;
-  ghost?: boolean;
-  category?: string;
+};
+
+export type GhostAnchorType = "real_node" | "ghost_node" | "graph";
+
+export type GhostSuggestion = {
+  id: string;
+  title: string;
+  summary: string;
+  category: string;
+  relationship_type: string;
+  reason: string;
+  confidence: number;
+  anchor_type: GhostAnchorType;
+  anchor_node_id?: string;
+  parent_ghost_id?: string;
+  root_node_id?: string;
+  x: number;
+  y: number;
 };
 
 function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
   const focused = data.focused || selected;
   const connected = data.connected;
   const dimmed = data.dimmed;
-  const ghost = data.ghost;
-
   return (
     <>
       <Handle
@@ -46,25 +61,18 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
       <div
         className={[
           "w-40 rounded-2xl border px-3 py-2.5 text-center transition-all duration-200",
-          ghost
-            ? "border-dashed border-violet-300/70 bg-violet-950/30 shadow-lg shadow-violet-500/20"
-            : focused
+          focused
             ? "border-teal-300 bg-neutral-800 shadow-lg shadow-teal-500/20 scale-105"
             : connected
             ? "border-teal-300/40 bg-canvas-surface shadow-md shadow-teal-500/10"
             : "border-canvas-border bg-canvas-surface shadow-sm",
-          dimmed && !ghost ? "opacity-50" : "opacity-100",
+          dimmed ? "opacity-50" : "opacity-100",
         ].join(" ")}
       >
-        {ghost && (
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-violet-200">
-            AI avenue
-          </p>
-        )}
         <p
           className={[
             "line-clamp-2 text-xs font-medium leading-snug",
-            focused || ghost ? "text-white" : "text-neutral-100",
+            focused ? "text-white" : "text-neutral-100",
           ].join(" ")}
         >
           {data.label}
@@ -79,54 +87,43 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
   );
 }
 
-const nodeTypes = { mindNode: MindNodeComponent };
+const nodeTypes = { mindNode: MindNodeComponent, ghostNode: GhostNodeComponent };
 
 function toFlowNodes(dbNodes: GraphNode[]): Node<MindNodeData>[] {
   return dbNodes.map((n) => ({
     id: n.id,
     type: "mindNode",
     position: { x: n.position_x, y: n.position_y },
-    data: { label: n.title, category: n.category },
-  }));
-}
-
-function toGhostFlowNodes(ghostNodes: GhostSuggestionNode[]): Node<MindNodeData>[] {
-  return ghostNodes.map((ghost) => ({
-    id: ghost.id,
-    type: "mindNode",
-    position: ghost.position,
-    data: { label: ghost.title, category: ghost.category, ghost: true },
+    data: { label: n.title },
   }));
 }
 
 type CanvasProps = {
   dbNodes: GraphNode[];
   dbEdges: GraphEdge[];
-  ghostNodes: GhostSuggestionNode[];
   selectedNodeId: string | null;
-  selectedGhostId: string | null;
   onNodeSelect: (id: string | null) => void;
-  onGhostSelect: (id: string) => void;
+  ghostSuggestions: GhostSuggestion[];
+  onGhostExplore: (id: string) => void;
+  onGhostPin: (id: string) => void;
+  onGhostDismiss: (id: string) => void;
 };
 
 export function Canvas({
   dbNodes,
   dbEdges,
-  ghostNodes,
   selectedNodeId,
-  selectedGhostId,
   onNodeSelect,
-  onGhostSelect,
+  ghostSuggestions,
+  onGhostExplore,
+  onGhostPin,
+  onGhostDismiss,
 }: CanvasProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<MindNodeData>>([
-    ...toFlowNodes(dbNodes),
-    ...toGhostFlowNodes(ghostNodes),
-  ]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<
+    Node<MindNodeData> | Node<GhostNodeData>
+  >(toFlowNodes(dbNodes));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
-  const ghostIds = useMemo(() => new Set(ghostNodes.map((ghost) => ghost.id)), [ghostNodes]);
-
-  // Compute connected IDs based on current selection.
   const connectedIds = useMemo<Set<string>>(() => {
     if (!selectedNodeId) return new Set();
     const s = new Set<string>();
@@ -137,7 +134,6 @@ export function Canvas({
     return s;
   }, [dbEdges, selectedNodeId]);
 
-  // Styled edges depend on selection. Re-derive when either changes.
   const styledEdges = useMemo<Edge[]>(() => {
     return dbEdges.map((e) => {
       const touchesSelected =
@@ -149,7 +145,7 @@ export function Canvas({
         source: e.source_node_id,
         target: e.target_node_id,
         label: e.label ?? e.relationship_type,
-        type: "smoothstep",
+        type: "default",
         animated: touchesSelected,
         style: {
           stroke: touchesSelected ? "#5eead4" : "#3a3f4b",
@@ -166,77 +162,123 @@ export function Canvas({
     });
   }, [dbEdges, selectedNodeId]);
 
-  useEffect(() => {
-    setEdges(styledEdges);
-  }, [styledEdges, setEdges]);
+  const ghostFlowNodes = useMemo<Node<GhostNodeData>[]>(() => {
+    return ghostSuggestions.map((g) => ({
+      id: g.id,
+      type: "ghostNode",
+      position: { x: g.x, y: g.y },
+      draggable: false,
+      data: {
+        title: g.title,
+        category: g.category,
+        reason: g.reason,
+        onExplore: () => onGhostExplore(g.id),
+        onPin: () => onGhostPin(g.id),
+        onDismiss: () => onGhostDismiss(g.id),
+      },
+    }));
+  }, [ghostSuggestions, onGhostExplore, onGhostPin, onGhostDismiss]);
 
-  // Reconcile real and ghost nodes while preserving any local drag positions.
-  useEffect(() => {
-    const incoming = [...toFlowNodes(dbNodes), ...toGhostFlowNodes(ghostNodes)];
-    const incomingIds = new Set(incoming.map((node) => node.id));
+  const ghostStyledEdges = useMemo<Edge[]>(() => {
+    const realNodeIds = new Set(dbNodes.map((n) => n.id));
+    const ghostIds = new Set(ghostSuggestions.map((g) => g.id));
+    const out: Edge[] = [];
+    for (const g of ghostSuggestions) {
+      let source: string | undefined;
+      if (g.anchor_type === "real_node" && g.anchor_node_id) {
+        if (realNodeIds.has(g.anchor_node_id)) source = g.anchor_node_id;
+      } else if (g.anchor_type === "ghost_node" && g.parent_ghost_id) {
+        if (ghostIds.has(g.parent_ghost_id)) source = g.parent_ghost_id;
+      }
+      if (!source) continue;
+      out.push({
+        id: `ghost-edge-${g.id}`,
+        source,
+        target: g.id,
+        type: "default",
+        animated: false,
+        style: {
+          stroke: "#a78bfa",
+          strokeWidth: 1,
+          strokeDasharray: "4 4",
+          opacity: 0.7,
+        },
+      });
+    }
+    return out;
+  }, [ghostSuggestions, dbNodes]);
 
+  const allEdges = useMemo<Edge[]>(
+    () => [...styledEdges, ...ghostStyledEdges],
+    [styledEdges, ghostStyledEdges],
+  );
+
+  useEffect(() => {
+    setEdges(allEdges);
+  }, [allEdges, setEdges]);
+
+  // Merge new real nodes; preserve existing positions and selection.
+  useEffect(() => {
     setNodes((prev) => {
-      const previousById = new Map(prev.map((node) => [node.id, node]));
-      return incoming.map((node) => {
-        const previous = previousById.get(node.id);
-        return {
-          ...node,
-          position: previous?.position ?? node.position,
-          selected: previous?.selected,
-        };
-      }).filter((node) => incomingIds.has(node.id));
+      const prevRealIds = new Set(
+        prev.filter((n) => n.type !== "ghostNode").map((n) => n.id),
+      );
+      const incoming = toFlowNodes(dbNodes).filter((n) => !prevRealIds.has(n.id));
+      return incoming.length === 0 ? prev : [...prev, ...incoming];
     });
-  }, [dbNodes, ghostNodes, setNodes]);
+  }, [dbNodes, setNodes]);
 
-  // Re-apply focus/connected/dimmed flags whenever selection or edges change.
+  // Sync ghost nodes — replace any existing ghosts wholesale.
+  useEffect(() => {
+    setNodes((prev) => {
+      const realNodes = prev.filter((n) => n.type !== "ghostNode");
+      return [...realNodes, ...ghostFlowNodes];
+    });
+  }, [ghostFlowNodes, setNodes]);
+
+  // Focus / connected / dimmed flags on real nodes only.
   useEffect(() => {
     setNodes((prev) =>
-      prev.map((n) => {
-        const isGhost = ghostIds.has(n.id);
-        const focused = n.id === selectedNodeId || n.id === selectedGhostId;
-        const connected = !isGhost && connectedIds.has(n.id);
-        const dimmed = selectedNodeId !== null && !focused && !connected && !isGhost;
-        return {
-          ...n,
-          data: { ...n.data, focused, connected, dimmed, ghost: isGhost },
-        };
+      prev.map((n): Node<MindNodeData> | Node<GhostNodeData> => {
+        if (n.type === "ghostNode") return n;
+        const real = n as Node<MindNodeData>;
+        const focused = real.id === selectedNodeId;
+        const connected = connectedIds.has(real.id);
+        const dimmed = selectedNodeId !== null && !focused && !connected;
+        return { ...real, data: { ...real.data, focused, connected, dimmed } };
       }),
     );
-  }, [selectedNodeId, selectedGhostId, connectedIds, ghostIds, setNodes]);
+  }, [selectedNodeId, connectedIds, setNodes]);
 
-  const onNodeDragStop: OnNodeDrag = useCallback(
-    (_event, node) => {
-      if (ghostIds.has(node.id)) return;
-      updateNodePositionAction(node.id, node.position.x, node.position.y).catch(
-        console.error,
-      );
-    },
-    [ghostIds],
-  );
+  const onNodeDragStop: OnNodeDrag = useCallback((_event, node) => {
+    if (node.type === "ghostNode") return;
+    updateNodePositionAction(node.id, node.position.x, node.position.y).catch(console.error);
+  }, []);
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
-      if (ghostIds.has(node.id)) {
-        onGhostSelect(node.id);
-        return;
-      }
+      if (node.type === "ghostNode") return;
       onNodeSelect(node.id);
     },
-    [ghostIds, onGhostSelect, onNodeSelect],
+    [onNodeSelect],
   );
 
   const onPaneClick = useCallback(() => {
     onNodeSelect(null);
   }, [onNodeSelect]);
 
-  if (nodes.length === 0) {
+  if (dbNodes.length === 0 && ghostSuggestions.length === 0) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <p className="text-center text-sm leading-relaxed text-neutral-500">
-          Drop your first thought below.
-          <br />
-          I&apos;ll suggest where it belongs.
-        </p>
+        <div className="max-w-xs text-center">
+          <p className="text-base font-semibold text-neutral-200">
+            Capture your first thought.
+          </p>
+          <p className="mt-2 text-sm leading-relaxed text-neutral-500">
+            MindNode will map it on the canvas and branch related avenues
+            around it as your graph grows.
+          </p>
+        </div>
       </div>
     );
   }

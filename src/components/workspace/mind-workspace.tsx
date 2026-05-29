@@ -1,17 +1,16 @@
 "use client";
 
-import { useState, useCallback, useMemo, useTransition } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 
-import { Canvas } from "@/components/canvas/Canvas";
+import { Canvas, type GhostSuggestion } from "@/components/canvas/Canvas";
 import { NodeDetail } from "@/components/nodes/node-detail";
 import { ThoughtInputForm } from "@/components/input/thought-input-form";
 import { RecentThoughtsList } from "@/components/input/recent-thoughts-list";
 import { signOutAction } from "@/app/login/actions";
 import { pinGhostSuggestionAction } from "@/lib/graph/actions";
-import type { GraphNode, GraphEdge, GhostSuggestionNode } from "@/types";
+import type { GraphNode, GraphEdge } from "@/types";
 import type { MemoryTrailMap } from "@/lib/graph/queries";
 import type { RecentMemoryEntry } from "@/lib/memory/queries";
-import type { ExplorationSuggestion } from "@/lib/ai/schema";
 
 type MindWorkspaceProps = {
   initialNodes: GraphNode[];
@@ -22,12 +21,34 @@ type MindWorkspaceProps = {
   userEmail: string;
 };
 
-type ActiveSheet = "composer" | "thoughts" | "detail" | "ghost" | null;
+type ActiveSheet = "composer" | "thoughts" | "detail" | "search" | null;
 
-type ExploreResponse = {
-  suggestions?: ExplorationSuggestion[];
-  error?: string;
+type ApiSuggestion = {
+  title: string;
+  summary: string;
+  category: string;
+  relationship_type: string;
+  reason: string;
+  confidence: number;
 };
+
+function positionGhosts(
+  count: number,
+  anchorX: number,
+  anchorY: number,
+  radius = 240,
+): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  const safe = Math.max(count, 1);
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2 * i) / safe - Math.PI / 2;
+    out.push({
+      x: anchorX + Math.cos(angle) * radius,
+      y: anchorY + Math.sin(angle) * radius,
+    });
+  }
+  return out;
+}
 
 function BottomSheet({
   open,
@@ -50,7 +71,6 @@ function BottomSheet({
       ].join(" ")}
       style={{ maxHeight: "75vh" }}
     >
-      {/* drag handle */}
       <div className="flex shrink-0 items-center justify-between px-5 pb-3 pt-4">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-700" />
       </div>
@@ -77,18 +97,6 @@ function BottomSheet({
   );
 }
 
-function ghostPosition(index: number, selectedNode?: GraphNode): { x: number; y: number } {
-  const angle = (Math.PI * 2 * index) / 4;
-  const radius = selectedNode ? 210 : 140;
-  const originX = selectedNode?.position_x ?? 0;
-  const originY = selectedNode?.position_y ?? 0;
-
-  return {
-    x: originX + Math.cos(angle) * radius,
-    y: originY + Math.sin(angle) * radius,
-  };
-}
-
 export function MindWorkspace({
   initialNodes,
   initialEdges,
@@ -98,42 +106,55 @@ export function MindWorkspace({
   userEmail,
 }: MindWorkspaceProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedGhostId, setSelectedGhostId] = useState<string | null>(null);
-  const [ghostNodes, setGhostNodes] = useState<GhostSuggestionNode[]>([]);
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
-  const [exploreError, setExploreError] = useState<string | null>(null);
-  const [pinError, setPinError] = useState<string | null>(null);
-  const [isExploring, startExploreTransition] = useTransition();
-  const [isPinning, startPinTransition] = useTransition();
+  const [ghosts, setGhosts] = useState<GhostSuggestion[]>([]);
+  // ghostId -> real_node_id created when that ghost was pinned. Lets a
+  // child ghost (whose parent has already been pinned) connect to the
+  // parent's new real node instead of the original root.
+  const [pinnedGhostMap, setPinnedGhostMap] = useState<Record<string, string>>({});
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const selectedNode = useMemo(
-    () => initialNodes.find((node) => node.id === selectedNodeId),
-    [initialNodes, selectedNodeId],
-  );
-  const selectedGhost = useMemo(
-    () => ghostNodes.find((ghost) => ghost.id === selectedGhostId),
-    [ghostNodes, selectedGhostId],
-  );
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return initialNodes
+      .filter(
+        (n) =>
+          n.title.toLowerCase().includes(q) ||
+          n.summary.toLowerCase().includes(q),
+      )
+      .slice(0, 20);
+  }, [initialNodes, searchQuery]);
+
+  // When user selects a different real node, drop ghosts whose anchor
+  // no longer matches. Pane-click (null) leaves ghosts alone.
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    setGhosts((prev) =>
+      prev.filter((g) => {
+        if (g.anchor_type === "real_node") return g.anchor_node_id === selectedNodeId;
+        if (g.anchor_type === "ghost_node") return g.root_node_id === selectedNodeId;
+        return false;
+      }),
+    );
+  }, [selectedNodeId]);
 
   const openSheet = useCallback((sheet: ActiveSheet) => {
     setActiveSheet(sheet);
     if (sheet !== "detail") {
       setSelectedNodeId(null);
     }
-    if (sheet !== "ghost") {
-      setSelectedGhostId(null);
-    }
   }, []);
 
   const closeSheet = useCallback(() => {
     setActiveSheet(null);
     setSelectedNodeId(null);
-    setSelectedGhostId(null);
   }, []);
 
   const handleNodeSelect = useCallback((id: string | null) => {
     setSelectedNodeId(id);
-    setSelectedGhostId(null);
     if (id) {
       setActiveSheet("detail");
     } else {
@@ -141,105 +162,191 @@ export function MindWorkspace({
     }
   }, []);
 
-  const handleGhostSelect = useCallback((id: string) => {
-    setSelectedGhostId(id);
-    setSelectedNodeId(null);
-    setActiveSheet("ghost");
-    setPinError(null);
-  }, []);
+  const handleSuggestAvenues = useCallback(async () => {
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const visible = ghosts.map((g) => g.title);
+      const body: {
+        selected_node_id?: string;
+        visible_ghost_titles: string[];
+      } = { visible_ghost_titles: visible };
+      if (selectedNodeId) body.selected_node_id = selectedNodeId;
 
-  const applySuggestions = useCallback(
-    (suggestions: ExplorationSuggestion[], sourceNodeId?: string) => {
-      const sourceNode = initialNodes.find((node) => node.id === sourceNodeId);
-      const timestamp = Date.now();
-      setGhostNodes(
-        suggestions.map((suggestion, index) => ({
-          ...suggestion,
-          id: `ghost-${timestamp}-${suggestion.id}-${index}`,
-          source_node_id: sourceNodeId,
-          position: ghostPosition(index, sourceNode),
-        })),
-      );
-      setSelectedGhostId(null);
-    },
-    [initialNodes],
-  );
-
-  const requestExploration = useCallback(
-    (context?: { title: string; summary: string; category?: string }) => {
-      const sourceNodeId = context ? selectedGhost?.source_node_id : selectedNodeId ?? undefined;
-      setExploreError(null);
-      startExploreTransition(async () => {
-        const response = await fetch("/api/explore", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            selected_node_id: sourceNodeId,
-            exploration_context: context,
-          }),
-        });
-        const payload = (await response.json().catch(() => ({}))) as ExploreResponse;
-
-        if (!response.ok || !payload.suggestions) {
-          setExploreError(payload.error ?? "Could not explore right now.");
-          return;
-        }
-
-        applySuggestions(payload.suggestions, sourceNodeId);
-        setActiveSheet(null);
+      const res = await fetch("/api/explore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
-    },
-    [applySuggestions, selectedGhost?.source_node_id, selectedNodeId],
-  );
-
-  const handlePinGhost = useCallback(() => {
-    if (!selectedGhost) return;
-    setPinError(null);
-    startPinTransition(async () => {
-      const result = await pinGhostSuggestionAction({
-        title: selectedGhost.title,
-        summary: selectedGhost.summary,
-        category: selectedGhost.category,
-        source_node_id: selectedGhost.source_node_id,
-        relationship_type: selectedGhost.relationship_type,
-      });
-
-      if (!result.success) {
-        setPinError(result.error ?? "Could not pin suggestion.");
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setAiError(json.error ?? "Could not load suggestions.");
         return;
       }
 
-      setGhostNodes((prev) => prev.filter((ghost) => ghost.id !== selectedGhost.id));
-      setSelectedGhostId(null);
-      setActiveSheet(null);
-    });
-  }, [selectedGhost]);
+      const suggestions = (json.suggestions ?? []) as ApiSuggestion[];
+      if (suggestions.length === 0) {
+        setAiError("No anchored avenues this time. Try again or refine the thought.");
+        return;
+      }
 
-  const handleDismissGhost = useCallback(() => {
-    if (!selectedGhostId) return;
-    setGhostNodes((prev) => prev.filter((ghost) => ghost.id !== selectedGhostId));
-    setSelectedGhostId(null);
-    setActiveSheet(null);
-  }, [selectedGhostId]);
+      let anchorX = 0;
+      let anchorY = 0;
+      if (selectedNodeId) {
+        const sel = initialNodes.find((n) => n.id === selectedNodeId);
+        if (sel) {
+          anchorX = sel.position_x;
+          anchorY = sel.position_y;
+        }
+      }
+
+      const positions = positionGhosts(suggestions.length, anchorX, anchorY);
+      const ts = Date.now();
+      const newGhosts: GhostSuggestion[] = suggestions.map((s, i) => ({
+        ...s,
+        id: `ghost-${ts}-${i}`,
+        anchor_type: selectedNodeId ? "real_node" : "graph",
+        anchor_node_id: selectedNodeId ?? undefined,
+        root_node_id: selectedNodeId ?? undefined,
+        x: positions[i].x,
+        y: positions[i].y,
+      }));
+      setGhosts(newGhosts);
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "Network error.");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [selectedNodeId, initialNodes, ghosts]);
+
+  const handleGhostExplore = useCallback(
+    async (ghostId: string) => {
+      const parent = ghosts.find((g) => g.id === ghostId);
+      if (!parent) return;
+      setAiLoading(true);
+      setAiError(null);
+      try {
+        const visible = ghosts.map((g) => g.title);
+        const body = {
+          exploration_context: {
+            ghost_id: parent.id,
+            title: parent.title,
+            summary: parent.summary,
+            category: parent.category,
+            parent_ghost_id: parent.id,
+            root_node_id: parent.root_node_id,
+          },
+          visible_ghost_titles: visible,
+        };
+
+        const res = await fetch("/api/explore", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.ok) {
+          setAiError(json.error ?? "Could not explore deeper.");
+          return;
+        }
+
+        const suggestions = (json.suggestions ?? []) as ApiSuggestion[];
+        if (suggestions.length === 0) {
+          setAiError("No deeper avenues. Try a different angle.");
+          return;
+        }
+
+        const positions = positionGhosts(suggestions.length, parent.x, parent.y, 200);
+        const ts = Date.now();
+        const children: GhostSuggestion[] = suggestions.map((s, i) => ({
+          ...s,
+          id: `ghost-${ts}-${i}`,
+          anchor_type: "ghost_node",
+          parent_ghost_id: parent.id,
+          root_node_id: parent.root_node_id,
+          x: positions[i].x,
+          y: positions[i].y,
+        }));
+        // Keep parent visible; replace siblings with new children.
+        setGhosts([parent, ...children]);
+      } catch (err) {
+        setAiError(err instanceof Error ? err.message : "Network error.");
+      } finally {
+        setAiLoading(false);
+      }
+    },
+    [ghosts],
+  );
+
+  const handleGhostPin = useCallback(
+    async (ghostId: string) => {
+      const ghost = ghosts.find((g) => g.id === ghostId);
+      if (!ghost) return;
+      setAiError(null);
+
+      let sourceNodeId: string | undefined;
+      if (ghost.anchor_type === "real_node") {
+        sourceNodeId = ghost.anchor_node_id;
+      } else if (ghost.anchor_type === "ghost_node") {
+        // If the parent ghost has already been pinned, attach to its new real
+        // node; otherwise fall back to the nearest real root.
+        const parentReal =
+          ghost.parent_ghost_id && pinnedGhostMap[ghost.parent_ghost_id];
+        sourceNodeId = parentReal || ghost.root_node_id;
+      }
+
+      const result = await pinGhostSuggestionAction({
+        title: ghost.title,
+        summary: ghost.summary,
+        category: ghost.category,
+        source_node_id: sourceNodeId,
+        relationship_type: ghost.relationship_type,
+        position_x: ghost.x,
+        position_y: ghost.y,
+      });
+
+      if (!result.success) {
+        setAiError(result.error ?? "Could not pin to canvas.");
+        return;
+      }
+      if (result.node_id) {
+        setPinnedGhostMap((prev) => ({ ...prev, [ghost.id]: result.node_id! }));
+      }
+      setGhosts((prev) => prev.filter((g) => g.id !== ghostId));
+    },
+    [ghosts, pinnedGhostMap],
+  );
+
+  const handleClearGhosts = useCallback(() => {
+    setGhosts([]);
+  }, []);
+
+  const handleGhostDismiss = useCallback((ghostId: string) => {
+    setGhosts((prev) => prev.filter((g) => g.id !== ghostId));
+  }, []);
 
   const sheetOpen = activeSheet !== null;
+  const suggestLabel = aiLoading
+    ? "Thinking…"
+    : selectedNodeId
+      ? "Explore this"
+      : "Suggest avenues";
 
   return (
     <div className="fixed inset-0 overflow-hidden">
-      {/* Canvas — full screen */}
       <div className="absolute inset-0 z-0">
         <Canvas
           dbNodes={initialNodes}
           dbEdges={initialEdges}
-          ghostNodes={ghostNodes}
           selectedNodeId={selectedNodeId}
-          selectedGhostId={selectedGhostId}
           onNodeSelect={handleNodeSelect}
-          onGhostSelect={handleGhostSelect}
+          ghostSuggestions={ghosts}
+          onGhostExplore={handleGhostExplore}
+          onGhostPin={handleGhostPin}
+          onGhostDismiss={handleGhostDismiss}
         />
       </div>
 
-      {/* Floating header */}
       <header
         className={[
           "fixed left-0 right-0 top-0 z-20",
@@ -252,6 +359,35 @@ export function MindWorkspace({
           MindNode
         </p>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSuggestAvenues}
+            disabled={aiLoading}
+            className="rounded-full border border-purple-400/40 bg-purple-950/30 px-3 py-1.5 text-xs font-medium text-purple-200 hover:bg-purple-950/50 disabled:opacity-50"
+          >
+            {suggestLabel}
+          </button>
+          {ghosts.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearGhosts}
+              title="Clear AI suggestions"
+              className="rounded-full border border-canvas-border bg-canvas-surface px-2 py-1.5 text-[10px] font-medium text-neutral-400 hover:text-neutral-100"
+            >
+              Clear
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => openSheet("search")}
+            aria-label="Search"
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
+          >
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <circle cx="5.5" cy="5.5" r="3.5" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M8.5 8.5L11.5 11.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
           <button
             type="button"
             onClick={() => openSheet("thoughts")}
@@ -271,28 +407,20 @@ export function MindWorkspace({
         </div>
       </header>
 
-      {/* Explore control */}
-      <div className="fixed bottom-24 left-4 z-50 max-w-[calc(100%-6rem)]">
-        <button
-          type="button"
-          onClick={() => requestExploration()}
-          disabled={isExploring}
-          className="rounded-full border border-violet-300/40 bg-violet-950/70 px-4 py-2 text-xs font-semibold text-violet-100 shadow-lg shadow-black/40 backdrop-blur hover:border-violet-200 disabled:opacity-60"
-        >
-          {isExploring
-            ? "Exploring…"
-            : selectedNodeId
-            ? "Explore this thought"
-            : "Suggest avenues"}
-        </button>
-        {exploreError && (
-          <p className="mt-2 max-w-60 rounded-lg border border-red-400/30 bg-red-950/60 px-3 py-2 text-xs leading-relaxed text-red-100">
-            {exploreError}
-          </p>
-        )}
-      </div>
+      {aiError && (
+        <div className="fixed left-1/2 top-16 z-30 flex max-w-[90vw] -translate-x-1/2 items-center gap-3 rounded-lg border border-red-500/40 bg-red-950/80 px-4 py-2 text-xs text-red-200 backdrop-blur">
+          <span className="line-clamp-2">{aiError}</span>
+          <button
+            type="button"
+            onClick={() => setAiError(null)}
+            aria-label="Dismiss"
+            className="shrink-0 text-red-300 hover:text-red-100"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
-      {/* FAB */}
       <button
         type="button"
         onClick={() => openSheet("composer")}
@@ -315,7 +443,6 @@ export function MindWorkspace({
         </svg>
       </button>
 
-      {/* Backdrop */}
       <div
         onClick={closeSheet}
         className={[
@@ -325,7 +452,6 @@ export function MindWorkspace({
         ].join(" ")}
       />
 
-      {/* Composer sheet */}
       <BottomSheet
         open={activeSheet === "composer"}
         onClose={closeSheet}
@@ -334,7 +460,6 @@ export function MindWorkspace({
         <ThoughtInputForm onSuccess={closeSheet} />
       </BottomSheet>
 
-      {/* Thoughts sheet */}
       <BottomSheet
         open={activeSheet === "thoughts"}
         onClose={closeSheet}
@@ -346,7 +471,6 @@ export function MindWorkspace({
         />
       </BottomSheet>
 
-      {/* Node detail sheet */}
       <BottomSheet
         open={activeSheet === "detail"}
         onClose={closeSheet}
@@ -363,65 +487,50 @@ export function MindWorkspace({
         />
       </BottomSheet>
 
-      {/* Ghost suggestion sheet */}
       <BottomSheet
-        open={activeSheet === "ghost"}
-        onClose={closeSheet}
-        title="AI avenue"
+        open={activeSheet === "search"}
+        onClose={() => {
+          setSearchQuery("");
+          closeSheet();
+        }}
+        title="Search thoughts"
       >
-        {selectedGhost ? (
-          <div className="space-y-4">
-            <div>
-              <p className="text-base font-semibold leading-snug text-neutral-100">
-                {selectedGhost.title}
-              </p>
-              <p className="mt-1 text-xs text-violet-200/80">
-                {selectedGhost.category} · {Math.round(selectedGhost.confidence * 100)}% confidence
-              </p>
-            </div>
-            <div className="rounded-lg border border-canvas-border bg-canvas-bg p-3">
-              <p className="text-sm leading-relaxed text-neutral-200">
-                {selectedGhost.summary}
-              </p>
-            </div>
-            <p className="text-xs leading-relaxed text-neutral-500">
-              {selectedGhost.reason}
-            </p>
-            {pinError && <p className="text-xs text-red-400">{pinError}</p>}
-            <div className="grid gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  requestExploration({
-                    title: selectedGhost.title,
-                    summary: selectedGhost.summary,
-                    category: selectedGhost.category,
-                  })
-                }
-                disabled={isExploring}
-                className="rounded-lg border border-violet-300/40 bg-violet-950/40 px-3 py-2 text-sm font-medium text-violet-100 disabled:opacity-60"
-              >
-                {isExploring ? "Exploring…" : "Explore deeper"}
-              </button>
-              <button
-                type="button"
-                onClick={handlePinGhost}
-                disabled={isPinning}
-                className="rounded-lg bg-teal-300 px-3 py-2 text-sm font-semibold text-canvas-bg disabled:opacity-60"
-              >
-                {isPinning ? "Pinning…" : "Pin to canvas"}
-              </button>
-              <button
-                type="button"
-                onClick={handleDismissGhost}
-                className="rounded-lg border border-canvas-border px-3 py-2 text-sm text-neutral-400"
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
+        <input
+          type="search"
+          autoFocus
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search titles and thoughts…"
+          className="block w-full rounded border border-canvas-border bg-canvas-bg px-3 py-2 text-sm text-neutral-100 outline-none focus:border-teal-300"
+        />
+        {searchResults.length > 0 ? (
+          <ul className="mt-3 space-y-2">
+            {searchResults.map((node) => (
+              <li key={node.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery("");
+                    handleNodeSelect(node.id);
+                  }}
+                  className="block w-full rounded border border-canvas-border bg-canvas-bg p-3 text-left hover:border-teal-300/40"
+                >
+                  <p className="line-clamp-1 text-sm font-medium text-neutral-100">
+                    {node.title}
+                  </p>
+                  <p className="mt-1 line-clamp-2 text-xs text-neutral-500">
+                    {node.summary}
+                  </p>
+                </button>
+              </li>
+            ))}
+          </ul>
         ) : (
-          <p className="text-sm text-neutral-600">Suggestion not found.</p>
+          <p className="mt-3 text-xs text-neutral-500">
+            {searchQuery.trim()
+              ? "No matches."
+              : "Type to search your thoughts."}
+          </p>
         )}
       </BottomSheet>
     </div>
