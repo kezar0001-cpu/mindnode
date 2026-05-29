@@ -10,6 +10,7 @@ import {
   Position,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Node,
   type Edge,
   type NodeProps,
@@ -82,11 +83,11 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
         className={[
           "w-40 rounded-2xl border px-3 py-2.5 text-center transition-all duration-200",
           focused
-            ? "border-teal-300 bg-neutral-800 shadow-lg shadow-teal-500/20 scale-105"
+            ? "border-teal-300 bg-neutral-800 shadow-xl shadow-teal-500/25 scale-[1.1]"
             : connected
             ? "shadow-md"
             : "shadow-sm",
-          dimmed ? "opacity-50" : "opacity-100",
+          dimmed ? "opacity-20" : "opacity-100",
         ].join(" ")}
         style={focused ? undefined : { ...borderStyle, ...bgStyle, boxShadow }}
       >
@@ -109,6 +110,25 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
 }
 
 const nodeTypes = { mindNode: MindNodeComponent, ghostNode: GhostNodeComponent };
+
+// Animates the viewport to centre on the selected real node.
+function FocusController({
+  selectedNodeId,
+  dbNodes,
+}: {
+  selectedNodeId: string | null;
+  dbNodes: GraphNode[];
+}) {
+  const { setCenter, getZoom } = useReactFlow();
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    const n = dbNodes.find((d) => d.id === selectedNodeId);
+    if (!n) return;
+    const z = Math.max(getZoom(), 1.0);
+    setCenter(n.position_x + 80, n.position_y + 25, { zoom: z, duration: 550 });
+  }, [selectedNodeId, dbNodes, setCenter, getZoom]);
+  return null;
+}
 
 function toFlowNodes(dbNodes: GraphNode[]): Node<MindNodeData>[] {
   return dbNodes.map((n) => {
@@ -374,6 +394,7 @@ export function Canvas({
       connectOnClick={false}
       className="bg-canvas-bg"
     >
+      <FocusController selectedNodeId={selectedNodeId} dbNodes={dbNodes} />
       <Background
         variant={BackgroundVariant.Dots}
         gap={24}
@@ -381,6 +402,7 @@ export function Canvas({
         color="#262a33"
       />
       <Controls
+        position="top-right"
         style={{
           background: "#15181f",
           border: "1px solid #262a33",

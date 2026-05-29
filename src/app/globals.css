@@ -15,19 +15,29 @@ body {
 .react-flow__controls {
   background: #15181f !important;
   border: 1px solid #262a33 !important;
-  border-radius: 6px !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4) !important;
 }
 .react-flow__controls-button {
   background: #15181f !important;
+  border: none !important;
   border-bottom: 1px solid #262a33 !important;
-  fill: #9ca3af !important;
+  fill: #6b7280 !important;
+  width: 28px !important;
+  height: 28px !important;
+}
+.react-flow__controls-button:last-child {
+  border-bottom: none !important;
 }
 .react-flow__controls-button:hover {
   background: #1e2229 !important;
+  fill: #d1d5db !important;
 }
 .react-flow__attribution {
-  background: transparent !important;
+  display: none !important;
 }
-.react-flow__attribution a {
-  color: #4b5563 !important;
+/* Smooth edge animations */
+.react-flow__edge-path {
+  transition: stroke 0.2s, stroke-width 0.2s, opacity 0.2s;
 }
