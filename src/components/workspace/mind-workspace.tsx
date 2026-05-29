@@ -890,6 +890,7 @@ export function MindWorkspace({
           onSelectNode={(id) => {
             setSelectedNodeId(id);
           }}
+          onNodeDeleted={closeSheet}
         />
       </BottomSheet>
 
