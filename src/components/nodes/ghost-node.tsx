@@ -7,6 +7,14 @@ export type GhostNodeData = Record<string, unknown> & {
   category: string;
   reason: string;
   confidence: number;
+  isSelectedGhost?: boolean;
+  isActivePath?: boolean;
+  isPathAncestor?: boolean;
+  isPathChild?: boolean;
+  isDimmed?: boolean;
+  isPinned?: boolean;
+  isPinning?: boolean;
+  depth?: number;
   onExplore: () => void;
   onPin: () => void;
   onDismiss: () => void;
@@ -20,15 +28,29 @@ function confidenceDotColour(confidence: number): string {
 
 export function GhostNodeComponent({ data, selected }: NodeProps<Node<GhostNodeData>>) {
   const dotColour = confidenceDotColour(data.confidence ?? 0);
+  const isSelectedGhost = Boolean(data.isSelectedGhost || selected);
+  const isPathAncestor = Boolean(data.isPathAncestor);
+  const isPathChild = Boolean(data.isPathChild);
+  const isDimmed = Boolean(data.isDimmed);
+  const isPinned = Boolean(data.isPinned);
+  const isPinning = Boolean(data.isPinning);
+  const pinDisabled = isPinned || isPinning;
+
   return (
     <>
       <Handle type="target" position={Position.Left} style={{ opacity: 0, width: 6, height: 6, border: "none" }} />
       <div
         className={[
           "w-44 rounded-2xl border-2 border-dashed px-3 py-2.5 text-center transition-all",
-          selected
-            ? "border-purple-300 bg-purple-950/40 shadow-lg shadow-purple-500/20"
-            : "border-purple-400/60 bg-purple-950/20 opacity-90",
+          isSelectedGhost
+            ? "border-purple-200 bg-purple-950/55 shadow-xl shadow-purple-400/30 scale-[1.04]"
+            : isPathAncestor
+              ? "border-purple-300/50 bg-purple-950/25 opacity-75 shadow-md shadow-purple-500/10"
+              : isPathChild
+                ? "border-purple-400/70 bg-purple-950/25 opacity-95 shadow-md shadow-purple-500/15"
+                : isDimmed
+                  ? "border-purple-500/25 bg-purple-950/10 opacity-35"
+                  : "border-purple-400/60 bg-purple-950/20 opacity-90",
         ].join(" ")}
       >
         <p className="mb-1 flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-purple-300/80">
@@ -47,7 +69,7 @@ export function GhostNodeComponent({ data, selected }: NodeProps<Node<GhostNodeD
         <p className="line-clamp-2 text-xs font-medium leading-snug text-purple-100">
           {data.title}
         </p>
-        {selected && (
+        {isSelectedGhost && (
           <div className="mt-2 flex justify-center gap-1.5">
             <button
               type="button"
@@ -58,10 +80,17 @@ export function GhostNodeComponent({ data, selected }: NodeProps<Node<GhostNodeD
             </button>
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); data.onPin(); }}
-              className="rounded-full bg-teal-300 px-2 py-0.5 text-[10px] font-medium text-canvas-bg hover:bg-teal-200"
+              onClick={(e) => { e.stopPropagation(); if (!pinDisabled) data.onPin(); }}
+              disabled={pinDisabled}
+              aria-disabled={pinDisabled}
+              className={[
+                "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                pinDisabled
+                  ? "cursor-not-allowed bg-teal-900/50 text-teal-200/60"
+                  : "bg-teal-300 text-canvas-bg hover:bg-teal-200",
+              ].join(" ")}
             >
-              Pin
+              {isPinned ? "Pinned" : isPinning ? "Pinning…" : "Pin"}
             </button>
             <button
               type="button"

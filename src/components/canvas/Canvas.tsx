@@ -38,6 +38,7 @@ export type GhostAnchorType = "real_node" | "ghost_node" | "graph";
 
 export type GhostSuggestion = {
   id: string;
+  ghost_id?: string;
   title: string;
   summary: string;
   category: string;
@@ -48,6 +49,15 @@ export type GhostSuggestion = {
   anchor_node_id?: string;
   parent_ghost_id?: string;
   root_node_id?: string;
+  depth?: number;
+  path_ids?: string[];
+  is_selected?: boolean;
+  is_active_path?: boolean;
+  is_path_ancestor?: boolean;
+  is_path_child?: boolean;
+  is_dimmed?: boolean;
+  is_pinned?: boolean;
+  is_pin_pending?: boolean;
   x: number;
   y: number;
 };
@@ -130,6 +140,66 @@ function FocusController({
   return null;
 }
 
+function GhostPathFocusController({
+  activeRootNodeId,
+  activeGhostPathIds,
+  selectedGhostId,
+  dbNodes,
+  ghostSuggestions,
+}: {
+  activeRootNodeId: string | null;
+  activeGhostPathIds: string[];
+  selectedGhostId: string | null;
+  dbNodes: GraphNode[];
+  ghostSuggestions: GhostSuggestion[];
+}) {
+  const { fitBounds } = useReactFlow();
+
+  useEffect(() => {
+    if (activeGhostPathIds.length === 0 && !selectedGhostId) return;
+
+    const points: { x: number; y: number }[] = [];
+    const root = activeRootNodeId
+      ? dbNodes.find((node) => node.id === activeRootNodeId)
+      : undefined;
+    if (root) {
+      points.push({ x: root.position_x, y: root.position_y });
+      points.push({ x: root.position_x + 160, y: root.position_y + 80 });
+    }
+
+    const activeSet = new Set(activeGhostPathIds);
+    for (const ghost of ghostSuggestions) {
+      const inPath = activeSet.has(ghost.id);
+      const isImmediateChild = Boolean(
+        selectedGhostId && ghost.parent_ghost_id === selectedGhostId,
+      );
+      if (!inPath && !isImmediateChild) continue;
+      points.push({ x: ghost.x, y: ghost.y });
+      points.push({ x: ghost.x + 176, y: ghost.y + 110 });
+    }
+
+    if (points.length === 0) return;
+
+    const minX = Math.min(...points.map((point) => point.x));
+    const minY = Math.min(...points.map((point) => point.y));
+    const maxX = Math.max(...points.map((point) => point.x));
+    const maxY = Math.max(...points.map((point) => point.y));
+    const padding = 96;
+
+    fitBounds(
+      {
+        x: minX - padding,
+        y: minY - padding,
+        width: Math.max(maxX - minX + padding * 2, 320),
+        height: Math.max(maxY - minY + padding * 2, 260),
+      },
+      { duration: 650, padding: 0.18 },
+    );
+  }, [activeGhostPathIds, activeRootNodeId, dbNodes, fitBounds, ghostSuggestions, selectedGhostId]);
+
+  return null;
+}
+
 function toFlowNodes(dbNodes: GraphNode[]): Node<MindNodeData>[] {
   return dbNodes.map((n) => {
     const colours = categoryColour(n.category || "general");
@@ -153,6 +223,10 @@ type CanvasProps = {
   selectedNodeId: string | null;
   onNodeSelect: (id: string | null) => void;
   ghostSuggestions: GhostSuggestion[];
+  activeRootNodeId: string | null;
+  activeGhostPathIds: string[];
+  selectedGhostId: string | null;
+  onGhostSelect: (id: string) => void;
   onGhostExplore: (id: string) => void;
   onGhostPin: (id: string) => void;
   onGhostDismiss: (id: string) => void;
@@ -164,6 +238,10 @@ export function Canvas({
   selectedNodeId,
   onNodeSelect,
   ghostSuggestions,
+  activeRootNodeId,
+  activeGhostPathIds,
+  selectedGhostId,
+  onGhostSelect,
   onGhostExplore,
   onGhostPin,
   onGhostDismiss,
@@ -236,6 +314,14 @@ export function Canvas({
         category: g.category,
         reason: g.reason,
         confidence: g.confidence,
+        isSelectedGhost: g.is_selected,
+        isActivePath: g.is_active_path,
+        isPathAncestor: g.is_path_ancestor,
+        isPathChild: g.is_path_child,
+        isDimmed: g.is_dimmed,
+        isPinned: g.is_pinned,
+        isPinning: g.is_pin_pending,
+        depth: g.depth,
         onExplore: () => onGhostExplore(g.id),
         onPin: () => onGhostPin(g.id),
         onDismiss: () => onGhostDismiss(g.id),
@@ -246,6 +332,7 @@ export function Canvas({
   const ghostStyledEdges = useMemo<Edge[]>(() => {
     const realNodeIds = new Set(dbNodes.map((n) => n.id));
     const ghostIds = new Set(ghostSuggestions.map((g) => g.id));
+    const activeSet = new Set(activeGhostPathIds);
     const out: Edge[] = [];
     for (const g of ghostSuggestions) {
       let source: string | undefined;
@@ -255,6 +342,7 @@ export function Canvas({
         if (ghostIds.has(g.parent_ghost_id)) source = g.parent_ghost_id;
       }
       if (!source) continue;
+      const activeChain = activeSet.has(g.id) && (g.anchor_type === "real_node" || activeSet.has(source));
       out.push({
         id: `ghost-edge-${g.id}`,
         source,
@@ -263,15 +351,17 @@ export function Canvas({
         animated: false,
         style: {
           stroke: "#a78bfa",
-          strokeWidth: 1,
+          strokeWidth: activeChain ? 2.25 : 1,
           strokeDasharray: "5 3",
-          opacity: 0.7,
-          filter: "drop-shadow(0 0 3px rgba(167,139,250,0.4))",
+          opacity: activeChain ? 0.95 : g.is_dimmed ? 0.25 : 0.65,
+          filter: activeChain
+            ? "drop-shadow(0 0 6px rgba(196,181,253,0.75))"
+            : "drop-shadow(0 0 3px rgba(167,139,250,0.4))",
         },
       });
     }
     return out;
-  }, [ghostSuggestions, dbNodes]);
+  }, [activeGhostPathIds, ghostSuggestions, dbNodes]);
 
   const allEdges = useMemo<Edge[]>(
     () => [...styledEdges, ...ghostStyledEdges],
@@ -322,10 +412,13 @@ export function Canvas({
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
-      if (node.type === "ghostNode") return;
+      if (node.type === "ghostNode") {
+        onGhostSelect(node.id);
+        return;
+      }
       onNodeSelect(node.id);
     },
-    [onNodeSelect],
+    [onGhostSelect, onNodeSelect],
   );
 
   const onPaneClick = useCallback(() => {
@@ -395,6 +488,13 @@ export function Canvas({
       className="bg-canvas-bg"
     >
       <FocusController selectedNodeId={selectedNodeId} dbNodes={dbNodes} />
+      <GhostPathFocusController
+        activeRootNodeId={activeRootNodeId}
+        activeGhostPathIds={activeGhostPathIds}
+        selectedGhostId={selectedGhostId}
+        dbNodes={dbNodes}
+        ghostSuggestions={ghostSuggestions}
+      />
       <Background
         variant={BackgroundVariant.Dots}
         gap={24}
