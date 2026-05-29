@@ -93,7 +93,12 @@ function BottomSheet({
           </svg>
         </button>
       </div>
-      <div className="overflow-y-auto px-5 pb-8">{children}</div>
+      <div
+        className="overflow-y-auto px-5"
+        style={{ paddingBottom: "max(32px, calc(env(safe-area-inset-bottom) + 24px))" }}
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -464,64 +469,86 @@ export function MindWorkspace({
       <header
         className={[
           "fixed left-0 right-0 top-0 z-20",
-          "flex items-center justify-between px-4 py-3",
-          "bg-canvas-bg/70 backdrop-blur-md",
+          "flex items-center justify-between px-4 py-2.5",
+          "bg-canvas-bg/80 backdrop-blur-md",
           "border-b border-canvas-border/50",
         ].join(" ")}
       >
         <p className="text-sm font-semibold tracking-tight text-neutral-100">
           MindNode
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          {/* AI / Suggest — sparkle icon */}
           <button
             type="button"
             onClick={handleSuggestAvenues}
             disabled={aiLoading}
-            className="rounded-full border border-purple-400/40 bg-purple-950/30 px-3 py-1.5 text-xs font-medium text-purple-200 hover:bg-purple-950/50 disabled:opacity-50"
+            aria-label={suggestLabel}
+            title={suggestLabel}
+            className={[
+              "flex h-7 w-7 items-center justify-center rounded-full border transition-colors",
+              aiLoading
+                ? "border-purple-400/20 bg-purple-950/20 text-purple-400/40"
+                : "border-purple-400/40 bg-purple-950/30 text-purple-300 hover:bg-purple-900/50",
+            ].join(" ")}
           >
-            {suggestLabel}
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+              <path d="M6.5 1L7.6 4.4H11.2L8.3 6.5L9.4 9.9L6.5 7.8L3.6 9.9L4.7 6.5L1.8 4.4H5.4Z" fill="currentColor" />
+            </svg>
           </button>
-          {ghosts.length > 0 && (
-            <button
-              type="button"
-              onClick={handleClearGhosts}
-              title="Clear AI suggestions"
-              className="rounded-full border border-canvas-border bg-canvas-surface px-2 py-1.5 text-[10px] font-medium text-neutral-400 hover:text-neutral-100"
-            >
-              Clear
-            </button>
-          )}
+
+          {/* Insights — only shown when there are insights */}
           {insightCount > 0 && (
             <button
               type="button"
               onClick={() => openSheet("insights")}
-              className="rounded-full border border-teal-400/40 bg-teal-950/30 px-3 py-1.5 text-xs font-medium text-teal-200 hover:bg-teal-950/50"
+              aria-label={`Insights: ${insightCount}`}
+              className="flex h-7 items-center gap-1 rounded-full border border-teal-400/40 bg-teal-950/30 px-2 text-[11px] font-medium text-teal-200 hover:bg-teal-950/50"
             >
-              Insights ({insightCount})
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                <rect x="0" y="5" width="2" height="5" rx="0.5" fill="currentColor" />
+                <rect x="4" y="2" width="2" height="8" rx="0.5" fill="currentColor" />
+                <rect x="8" y="0" width="2" height="10" rx="0.5" fill="currentColor" />
+              </svg>
+              {insightCount}
             </button>
           )}
+
+          {/* Search */}
           <button
             type="button"
             onClick={() => openSheet("search")}
-            aria-label="Search"
+            aria-label="Search thoughts"
             className="flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
           >
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
               <circle cx="5.5" cy="5.5" r="3.5" stroke="currentColor" strokeWidth="1.5" />
               <path d="M8.5 8.5L11.5 11.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           </button>
+
+          {/* Thoughts — list icon with count badge */}
           <button
             type="button"
             onClick={() => openSheet("thoughts")}
-            className="rounded-full border border-canvas-border bg-canvas-surface px-3 py-1.5 text-xs font-medium text-neutral-300 hover:text-neutral-100"
+            aria-label="Recent thoughts"
+            className="relative flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
           >
-            Thoughts{recentEntries.length > 0 ? ` (${recentEntries.length})` : ""}
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+              <path d="M1 3h11M1 6.5h8M1 10h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+            {recentEntries.length > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-neutral-600 text-[8px] font-bold leading-none text-white">
+                {Math.min(recentEntries.length, 9)}
+              </span>
+            )}
           </button>
+
+          {/* Avatar / sign out */}
           <form action={signOutAction}>
             <button
               type="submit"
-              title={userEmail}
+              title={`Sign out (${userEmail})`}
               className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-800 text-xs font-medium text-neutral-400 hover:text-neutral-200"
             >
               {userEmail.charAt(0).toUpperCase()}
@@ -544,55 +571,50 @@ export function MindWorkspace({
         </div>
       )}
 
-      {/* Graph control mini-tray — bottom-left, mirrors FAB position */}
-      <div className="fixed bottom-6 left-5 z-20 flex flex-col gap-2">
+      {/* Graph control tray — bottom-left glass pill, above safe area */}
+      <div
+        className="fixed left-4 z-20 flex items-center gap-0.5 rounded-full border border-canvas-border bg-canvas-surface/90 px-1.5 py-1.5 shadow-md backdrop-blur-sm"
+        style={{ bottom: "max(24px, calc(env(safe-area-inset-bottom) + 8px))" }}
+      >
         <button
           type="button"
           onClick={() => setHideGhosts((h) => !h)}
-          aria-label={hideGhosts ? "Show ghosts" : "Hide ghosts"}
+          aria-label={hideGhosts ? "Show AI suggestions" : "Hide AI suggestions"}
           title={hideGhosts ? "Show AI suggestions" : "Hide AI suggestions"}
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 shadow-md hover:text-neutral-100"
+          className={[
+            "flex h-7 w-7 items-center justify-center rounded-full transition-colors",
+            hideGhosts ? "text-neutral-600 hover:text-neutral-400" : "text-neutral-400 hover:text-neutral-100",
+          ].join(" ")}
         >
           {hideGhosts ? (
-            /* eye-off */
-            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+            <svg width="14" height="14" viewBox="0 0 15 15" fill="none" aria-hidden="true">
               <path
                 d="M2 2L13 13M6.2 6.3A2 2 0 0 0 8.7 8.8M4 4.4C2.6 5.4 1.5 6.6 1 7.5c1.3 2.5 3.8 4.5 6.5 4.5 1.2 0 2.3-.3 3.3-.9M9.5 3.8C8.9 3.3 8.2 3 7.5 3 4.8 3 2.3 5 1 7.5c.5.9 1.3 1.7 2.2 2.4"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+                stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"
               />
             </svg>
           ) : (
-            /* eye */
-            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-              <path
-                d="M1 7.5C2.3 5 4.8 3 7.5 3S12.7 5 14 7.5C12.7 10 10.2 12 7.5 12S2.3 10 1 7.5Z"
-                stroke="currentColor"
-                strokeWidth="1.3"
-              />
+            <svg width="14" height="14" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+              <path d="M1 7.5C2.3 5 4.8 3 7.5 3S12.7 5 14 7.5C12.7 10 10.2 12 7.5 12S2.3 10 1 7.5Z" stroke="currentColor" strokeWidth="1.3" />
               <circle cx="7.5" cy="7.5" r="2" stroke="currentColor" strokeWidth="1.3" />
             </svg>
           )}
         </button>
         {ghosts.length > 0 && (
-          <button
-            type="button"
-            onClick={handleClearGhosts}
-            aria-label="Clear all AI suggestions"
-            title="Clear all AI suggestions"
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 shadow-md hover:text-red-300"
-          >
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-              <path
-                d="M1 1l11 11M12 1L1 12"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
+          <>
+            <div className="h-4 w-px bg-canvas-border" />
+            <button
+              type="button"
+              onClick={handleClearGhosts}
+              aria-label="Clear all AI suggestions"
+              title="Clear all AI suggestions"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-neutral-500 transition-colors hover:text-red-400"
+            >
+              <svg width="10" height="10" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+                <path d="M1 1l11 11M12 1L1 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+            </button>
+          </>
         )}
       </div>
 
@@ -601,12 +623,13 @@ export function MindWorkspace({
         onClick={() => openSheet("composer")}
         aria-label="Add thought"
         className={[
-          "fixed bottom-6 right-5 z-20",
+          "fixed right-5 z-20",
           "flex h-14 w-14 items-center justify-center",
           "rounded-full bg-neutral-100 shadow-lg shadow-black/50",
           "text-canvas-bg transition-all duration-200",
           sheetOpen ? "scale-0 opacity-0 pointer-events-none" : "scale-100 opacity-100",
         ].join(" ")}
+        style={{ bottom: "max(24px, calc(env(safe-area-inset-bottom) + 8px))" }}
       >
         <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
           <path
