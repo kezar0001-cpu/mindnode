@@ -33,6 +33,48 @@ type ApiSuggestion = {
   confidence: number;
 };
 
+type GhostPathState = {
+  activeRootNodeId: string | null;
+  activeGhostPathIds: string[];
+  selectedGhostId: string | null;
+};
+
+const emptyGhostPathState: GhostPathState = {
+  activeRootNodeId: null,
+  activeGhostPathIds: [],
+  selectedGhostId: null,
+};
+
+function deriveGhostPath(ghosts: GhostSuggestion[], ghostId: string): string[] {
+  const byId = new Map(ghosts.map((g) => [g.id, g]));
+  const path: string[] = [];
+  const seen = new Set<string>();
+  let current = byId.get(ghostId);
+
+  while (current && !seen.has(current.id)) {
+    path.unshift(current.id);
+    seen.add(current.id);
+    current = current.parent_ghost_id ? byId.get(current.parent_ghost_id) : undefined;
+  }
+
+  return path;
+}
+
+function getGhostPathState(ghosts: GhostSuggestion[], ghostId: string): GhostPathState {
+  const selected = ghosts.find((g) => g.id === ghostId);
+  if (!selected) return emptyGhostPathState;
+
+  const pathIds = selected.path_ids && selected.path_ids.length > 0
+    ? selected.path_ids
+    : deriveGhostPath(ghosts, ghostId);
+
+  return {
+    activeRootNodeId: selected.root_node_id ?? selected.anchor_node_id ?? null,
+    activeGhostPathIds: pathIds,
+    selectedGhostId: ghostId,
+  };
+}
+
 function positionGhosts(
   count: number,
   anchorX: number,
@@ -122,6 +164,9 @@ export function MindWorkspace({
   const [aiError, setAiError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [hideGhosts, setHideGhosts] = useState(false);
+  const [activeRootNodeId, setActiveRootNodeId] = useState<string | null>(null);
+  const [activeGhostPathIds, setActiveGhostPathIds] = useState<string[]>([]);
+  const [selectedGhostId, setSelectedGhostId] = useState<string | null>(null);
 
   // Insights derived from the in-memory graph.
   const insights = useMemo(
@@ -170,12 +215,24 @@ export function MindWorkspace({
 
   const handleNodeSelect = useCallback((id: string | null) => {
     setSelectedNodeId(id);
+    setSelectedGhostId(null);
+    setActiveGhostPathIds([]);
+    setActiveRootNodeId(id);
     if (id) {
       setActiveSheet("detail");
     } else {
       setActiveSheet(null);
     }
   }, []);
+
+  const handleGhostSelect = useCallback((ghostId: string) => {
+    const next = getGhostPathState(ghosts, ghostId);
+    setSelectedNodeId(next.activeRootNodeId);
+    setActiveSheet(null);
+    setActiveRootNodeId(next.activeRootNodeId);
+    setActiveGhostPathIds(next.activeGhostPathIds);
+    setSelectedGhostId(next.selectedGhostId);
+  }, [ghosts]);
 
   // Shared explore fetch helper — wraps fetch + error handling.
   const callExplore = useCallback(
@@ -238,16 +295,25 @@ export function MindWorkspace({
 
       const positions = positionGhosts(suggestions.length, anchorX, anchorY);
       const ts = Date.now();
-      const newGhosts: GhostSuggestion[] = suggestions.map((s, i) => ({
-        ...s,
-        id: `ghost-${ts}-${i}`,
-        anchor_type: selectedNodeId ? "real_node" : "graph",
-        anchor_node_id: selectedNodeId ?? undefined,
-        root_node_id: selectedNodeId ?? undefined,
-        x: positions[i].x,
-        y: positions[i].y,
-      }));
+      const newGhosts: GhostSuggestion[] = suggestions.map((suggestion, i) => {
+        const id = `ghost-${ts}-${i}`;
+        return {
+          ...suggestion,
+          id,
+          ghost_id: id,
+          anchor_type: selectedNodeId ? "real_node" : "graph",
+          anchor_node_id: selectedNodeId ?? undefined,
+          root_node_id: selectedNodeId ?? undefined,
+          depth: 0,
+          path_ids: [id],
+          x: positions[i].x,
+          y: positions[i].y,
+        };
+      });
       setGhosts(newGhosts);
+      setActiveRootNodeId(selectedNodeId);
+      setActiveGhostPathIds([]);
+      setSelectedGhostId(null);
     } catch (err) {
       setAiError(err instanceof Error ? err.message : "Network error.");
     } finally {
@@ -284,17 +350,29 @@ export function MindWorkspace({
 
         const positions = positionGhosts(suggestions.length, parent.x, parent.y, 200);
         const ts = Date.now();
-        const children: GhostSuggestion[] = suggestions.map((s, i) => ({
-          ...s,
-          id: `ghost-${ts}-${i}`,
-          anchor_type: "ghost_node",
-          parent_ghost_id: parent.id,
-          root_node_id: parent.root_node_id,
-          x: positions[i].x,
-          y: positions[i].y,
-        }));
-        // Keep parent visible; replace siblings with new children.
-        setGhosts([parent, ...children]);
+        const parentPath = parent.path_ids && parent.path_ids.length > 0
+          ? parent.path_ids
+          : deriveGhostPath(ghosts, parent.id);
+        const children: GhostSuggestion[] = suggestions.map((suggestion, i) => {
+          const id = `ghost-${ts}-${i}`;
+          return {
+            ...suggestion,
+            id,
+            ghost_id: id,
+            anchor_type: "ghost_node",
+            anchor_node_id: parent.id,
+            parent_ghost_id: parent.id,
+            root_node_id: parent.root_node_id,
+            depth: (parent.depth ?? Math.max(parentPath.length - 1, 0)) + 1,
+            path_ids: [...parentPath, id],
+            x: positions[i].x,
+            y: positions[i].y,
+          };
+        });
+        setGhosts((prev) => [...prev, ...children]);
+        setActiveRootNodeId(parent.root_node_id ?? null);
+        setActiveGhostPathIds(parentPath);
+        setSelectedGhostId(parent.id);
       } catch (err) {
         setAiError(err instanceof Error ? err.message : "Network error.");
       } finally {
@@ -308,17 +386,29 @@ export function MindWorkspace({
     async (ghostId: string) => {
       const ghost = ghosts.find((g) => g.id === ghostId);
       if (!ghost) return;
+      if (pinnedGhostMap[ghost.id]) {
+        const next = getGhostPathState(ghosts, ghostId);
+        setActiveRootNodeId(next.activeRootNodeId);
+        setActiveGhostPathIds(next.activeGhostPathIds);
+        setSelectedGhostId(next.selectedGhostId);
+        return;
+      }
       setAiError(null);
 
       let sourceNodeId: string | undefined;
       if (ghost.anchor_type === "real_node") {
         sourceNodeId = ghost.anchor_node_id;
       } else if (ghost.anchor_type === "ghost_node") {
-        // If the parent ghost has already been pinned, attach to its new real
-        // node; otherwise fall back to the nearest real root.
-        const parentReal =
-          ghost.parent_ghost_id && pinnedGhostMap[ghost.parent_ghost_id];
-        sourceNodeId = parentReal || ghost.root_node_id;
+        // Prefer the nearest pinned ghost ancestor, so pinned chains connect
+        // parent real node -> child real node. Fall back to the real root.
+        const pathIds = ghost.path_ids && ghost.path_ids.length > 0
+          ? ghost.path_ids
+          : deriveGhostPath(ghosts, ghost.id);
+        const ancestorIds = pathIds.slice(0, -1).reverse();
+        const pinnedAncestorId = ancestorIds.find((id) => pinnedGhostMap[id]);
+        sourceNodeId = pinnedAncestorId
+          ? pinnedGhostMap[pinnedAncestorId]
+          : ghost.root_node_id;
       }
 
       const result = await pinGhostSuggestionAction({
@@ -339,18 +429,42 @@ export function MindWorkspace({
       if (result.node_id) {
         setPinnedGhostMap((prev) => ({ ...prev, [ghost.id]: result.node_id! }));
       }
-      setGhosts((prev) => prev.filter((g) => g.id !== ghostId));
+      const next = getGhostPathState(ghosts, ghostId);
+      setActiveRootNodeId(next.activeRootNodeId);
+      setActiveGhostPathIds(next.activeGhostPathIds);
+      setSelectedGhostId(next.selectedGhostId);
     },
     [ghosts, pinnedGhostMap],
   );
 
   const handleClearGhosts = useCallback(() => {
     setGhosts([]);
+    setActiveRootNodeId(null);
+    setActiveGhostPathIds([]);
+    setSelectedGhostId(null);
+    setPinnedGhostMap({});
   }, []);
 
   const handleGhostDismiss = useCallback((ghostId: string) => {
-    setGhosts((prev) => prev.filter((g) => g.id !== ghostId));
-  }, []);
+    setGhosts((prev) => {
+      const removed = new Set<string>([ghostId]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const ghost of prev) {
+          if (ghost.parent_ghost_id && removed.has(ghost.parent_ghost_id) && !removed.has(ghost.id)) {
+            removed.add(ghost.id);
+            changed = true;
+          }
+        }
+      }
+      return prev.filter((g) => !removed.has(g.id));
+    });
+    if (selectedGhostId === ghostId || activeGhostPathIds.includes(ghostId)) {
+      setActiveGhostPathIds([]);
+      setSelectedGhostId(null);
+    }
+  }, [activeGhostPathIds, selectedGhostId]);
 
   // Insight action handler — dispatches explore call based on insight kind.
   const handleInsightAction = useCallback(
@@ -377,16 +491,25 @@ export function MindWorkspace({
               node.position_y,
             );
             const ts = Date.now();
-            const newGhosts: GhostSuggestion[] = suggestions.map((s, i) => ({
-              ...s,
-              id: `ghost-${ts}-${i}`,
-              anchor_type: "real_node",
-              anchor_node_id: node.id,
-              root_node_id: node.id,
-              x: positions[i].x,
-              y: positions[i].y,
-            }));
+            const newGhosts: GhostSuggestion[] = suggestions.map((suggestion, i) => {
+              const id = `ghost-${ts}-${i}`;
+              return {
+                ...suggestion,
+                id,
+                ghost_id: id,
+                anchor_type: "real_node",
+                anchor_node_id: node.id,
+                root_node_id: node.id,
+                depth: 0,
+                path_ids: [id],
+                x: positions[i].x,
+                y: positions[i].y,
+              };
+            });
             setGhosts((prev) => [...prev, ...newGhosts]);
+            setActiveRootNodeId(node.id);
+            setActiveGhostPathIds([]);
+            setSelectedGhostId(null);
             setActiveSheet(null);
             break;
           }
@@ -418,16 +541,25 @@ export function MindWorkspace({
               a.position_y,
             );
             const ts = Date.now();
-            const newGhosts: GhostSuggestion[] = suggestions.map((s, i) => ({
-              ...s,
-              id: `ghost-${ts}-${i}`,
-              anchor_type: "real_node",
-              anchor_node_id: a.id,
-              root_node_id: a.id,
-              x: positions[i].x,
-              y: positions[i].y,
-            }));
+            const newGhosts: GhostSuggestion[] = suggestions.map((suggestion, i) => {
+              const id = `ghost-${ts}-${i}`;
+              return {
+                ...suggestion,
+                id,
+                ghost_id: id,
+                anchor_type: "real_node",
+                anchor_node_id: a.id,
+                root_node_id: a.id,
+                depth: 0,
+                path_ids: [id],
+                x: positions[i].x,
+                y: positions[i].y,
+              };
+            });
             setGhosts((prev) => [...prev, ...newGhosts]);
+            setActiveRootNodeId(a.id);
+            setActiveGhostPathIds([]);
+            setSelectedGhostId(null);
             setActiveSheet(null);
             break;
           }
@@ -449,7 +581,26 @@ export function MindWorkspace({
       : "Suggest avenues";
 
   // Ghosts passed to canvas — hidden when user toggled off.
-  const visibleGhosts = hideGhosts ? [] : ghosts;
+  const visibleGhosts = useMemo(() => {
+    if (hideGhosts) return [];
+    const activeSet = new Set(activeGhostPathIds);
+    const childOfActivePath = new Set(
+      ghosts
+        .filter((ghost) => ghost.parent_ghost_id && activeSet.has(ghost.parent_ghost_id))
+        .map((ghost) => ghost.id),
+    );
+    return ghosts.map((ghost) => ({
+      ...ghost,
+      is_selected: ghost.id === selectedGhostId,
+      is_active_path: activeSet.has(ghost.id),
+      is_path_ancestor: activeSet.has(ghost.id) && ghost.id !== selectedGhostId,
+      is_path_child: childOfActivePath.has(ghost.id) && !activeSet.has(ghost.id),
+      is_dimmed: activeSet.size > 0
+        && !activeSet.has(ghost.id)
+        && !childOfActivePath.has(ghost.id),
+      is_pinned: Boolean(pinnedGhostMap[ghost.id]),
+    }));
+  }, [activeGhostPathIds, ghosts, hideGhosts, pinnedGhostMap, selectedGhostId]);
 
   return (
     <div className="fixed inset-0 overflow-hidden">
@@ -460,6 +611,10 @@ export function MindWorkspace({
           selectedNodeId={selectedNodeId}
           onNodeSelect={handleNodeSelect}
           ghostSuggestions={visibleGhosts}
+          activeRootNodeId={activeRootNodeId}
+          activeGhostPathIds={activeGhostPathIds}
+          selectedGhostId={selectedGhostId}
+          onGhostSelect={handleGhostSelect}
           onGhostExplore={handleGhostExplore}
           onGhostPin={handleGhostPin}
           onGhostDismiss={handleGhostDismiss}
