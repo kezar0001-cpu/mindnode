@@ -94,6 +94,7 @@ type NodeDetailProps = {
   nodeDocumentSources?: Record<string, NodeDocumentSource>;
   onSelectNode: (id: string) => void;
   onNodeDeleted: () => void;
+  onAskAboutNode?: (node: { id: string; title: string }, prompt: string) => void;
 };
 
 export function NodeDetail({
@@ -104,6 +105,7 @@ export function NodeDetail({
   nodeDocumentSources,
   onSelectNode,
   onNodeDeleted,
+  onAskAboutNode,
 }: NodeDetailProps) {
   const router = useRouter();
 
@@ -332,6 +334,41 @@ export function NodeDetail({
           )}
         </div>
       </div>
+
+      {/* Companion actions — open a node-focused chat with a prepared prompt */}
+      {!editMode && onAskAboutNode && (
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            {
+              label: "Ask about this",
+              prompt: `Tell me about "${node.title}" and how it fits into my graph.`,
+            },
+            {
+              label: "Explore from here",
+              prompt: `Explore new branches and directions stemming from "${node.title}".`,
+            },
+            {
+              label: "Find related sources",
+              prompt: `What in my uploaded sources relates to "${node.title}"? Cite them.`,
+            },
+            {
+              label: "Suggest next steps",
+              prompt: `Based on "${node.title}", what concrete next steps should I consider?`,
+            },
+          ].map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              onClick={() =>
+                onAskAboutNode({ id: node.id, title: node.title }, action.prompt)
+              }
+              className="rounded-full border border-teal-400/40 bg-teal-950/30 px-2.5 py-1 text-[11px] font-medium text-teal-200 hover:bg-teal-950/60"
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Edit form */}
       {editMode ? (

@@ -8,6 +8,7 @@ import { ThoughtInputForm } from "@/components/input/thought-input-form";
 import { RecentThoughtsList } from "@/components/input/recent-thoughts-list";
 import { DocumentList } from "@/components/documents/document-list";
 import { DocumentUploadSheet } from "@/components/documents/document-upload-sheet";
+import { ChatPanel } from "@/components/chat/chat-panel";
 import { signOutAction } from "@/app/login/actions";
 import { pinGhostSuggestionAction } from "@/lib/graph/actions";
 import { deriveInsights, summarizeInsights, type Insight } from "@/lib/graph/insights";
@@ -190,6 +191,21 @@ export function MindWorkspace({
   const [activeRootNodeId, setActiveRootNodeId] = useState<string | null>(null);
   const [activeGhostPathIds, setActiveGhostPathIds] = useState<string[]>([]);
   const [selectedGhostId, setSelectedGhostId] = useState<string | null>(null);
+
+  // Chat companion state.
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatFocusNode, setChatFocusNode] = useState<{ id: string; title: string } | null>(null);
+  const [chatStarter, setChatStarter] = useState<{ prompt: string; nonce: number } | null>(null);
+
+  const openChat = useCallback(
+    (focus?: { id: string; title: string } | null, prompt?: string) => {
+      setChatFocusNode(focus ?? null);
+      setChatStarter(prompt ? { prompt, nonce: Date.now() } : null);
+      setActiveSheet(null);
+      setChatOpen(true);
+    },
+    [],
+  );
 
   // Insights derived from the in-memory graph.
   const insights = useMemo(
@@ -663,6 +679,24 @@ export function MindWorkspace({
           MindNode
         </p>
         <div className="flex items-center gap-1.5">
+          {/* Chat companion — speech bubble icon */}
+          <button
+            type="button"
+            onClick={() => openChat(null)}
+            aria-label="Open companion chat"
+            title="Companion chat"
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-teal-400/40 bg-teal-950/30 text-teal-200 transition-colors hover:bg-teal-900/50"
+          >
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path
+                d="M1.5 3.5A1.5 1.5 0 0 1 3 2h8a1.5 1.5 0 0 1 1.5 1.5v5A1.5 1.5 0 0 1 11 10H5.5L3 12.2V10a1.5 1.5 0 0 1-1.5-1.5v-5Z"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+
           {/* AI / Suggest — sparkle icon */}
           <button
             type="button"
@@ -891,6 +925,7 @@ export function MindWorkspace({
             setSelectedNodeId(id);
           }}
           onNodeDeleted={closeSheet}
+          onAskAboutNode={(node, prompt) => openChat(node, prompt)}
         />
       </BottomSheet>
 
@@ -1021,6 +1056,15 @@ export function MindWorkspace({
           </button>
         </div>
       )}
+
+      <ChatPanel
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        focusNode={chatFocusNode}
+        onClearFocus={() => setChatFocusNode(null)}
+        starter={chatStarter}
+        onApplied={() => router.refresh()}
+      />
     </div>
   );
 }

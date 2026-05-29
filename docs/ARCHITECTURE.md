@@ -83,6 +83,39 @@ docs/          Product and engineering docs
 - **Suggestion is rejected.** Memory entry remains in `memory_entries`. User can ask for a new suggestion later.
 - **DB write fails after AI call.** Surface the error; the raw entry insert happens first so nothing is silently discarded.
 
+## Source-Grounded Chat Brain
+
+The chat companion turns MindNode from "graph viewer" into a reasoning system
+grounded in the user's own sources and graph.
+
+```
+Chat UI (chat-panel.tsx)
+   │  POST /api/chat { message, selected_node_id?, conversation_id?, mode? }
+   ▼
+/api/chat (route.ts)
+   ├─ retrieveChatContext()  ── keyword/token-overlap over nodes, edges,
+   │   (src/lib/chat/retrieval.ts)   source chunks, selected-node neighborhood,
+   │                                 recent thoughts. No embeddings (MVP).
+   ├─ generateChatResponse() ── grounded answer + citations + optional
+   │   (src/lib/ai/chat.ts)         proposed_graph_changes (Zod-validated)
+   └─ persist chat_messages + pending chat_graph_suggestions
+   ▼
+Suggested additions reviewed in the UI →
+applyChatGraphSuggestionAction() / dismissChatGraphSuggestionAction()
+   (src/lib/chat/actions.ts) — never auto-applied; dedupes by normalized title;
+   new nodes/edges get origin "chat_suggested".
+```
+
+Data model (migration `20260531000000_add_chat_brain.sql`, all RLS-protected):
+`chat_conversations`, `chat_messages`, `chat_graph_suggestions`. The
+`nodes.origin` / `edges.origin` CHECK constraints gain `chat_suggested` so
+chat-driven graph growth stays fully traceable.
+
+Node-focused chat: the node detail sheet offers "Ask about this",
+"Explore from here", "Find related sources", and "Suggest next steps", which
+open the chat with `selected_node_id` set and a prepared starter prompt. The
+retrieval layer then includes that node plus its neighborhood as context.
+
 ## Why These Choices
 
 - **Next.js App Router**: server components + API routes in one project, minimal config.
