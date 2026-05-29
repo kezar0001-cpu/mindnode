@@ -2,7 +2,10 @@
 
 import { useState, useTransition } from "react";
 import type { GraphNode, GraphEdge, NodeOrigin, EdgeOrigin } from "@/types";
-import type { MemoryTrailMap } from "@/lib/graph/queries";
+import type {
+  MemoryTrailMap,
+  NodeDocumentSource,
+} from "@/lib/graph/queries";
 import { createEdgeAction } from "@/lib/graph/actions";
 import { categoryColour } from "@/lib/graph/insights";
 
@@ -21,6 +24,7 @@ function formatTimestamp(iso: string): string {
 // Origin badge helpers.
 function OriginBadge({ origin }: { origin: string }) {
   const isAiPinned = origin === "ai_pinned";
+  const isDocument = origin === "document_ai";
   const label =
     origin === "memory"
       ? "From memory"
@@ -30,6 +34,8 @@ function OriginBadge({ origin }: { origin: string }) {
       ? "AI exploration"
       : origin === "imported"
       ? "Imported"
+      : origin === "document_ai"
+      ? "Document"
       : origin;
 
   return (
@@ -38,6 +44,8 @@ function OriginBadge({ origin }: { origin: string }) {
         "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
         isAiPinned
           ? "border border-violet-400/40 bg-violet-950/30 text-violet-200"
+          : isDocument
+          ? "border border-blue-400/40 bg-blue-950/30 text-blue-200"
           : "border border-neutral-700 bg-neutral-800/50 text-neutral-400",
       ].join(" ")}
     >
@@ -63,6 +71,7 @@ type NodeDetailProps = {
   nodes: GraphNode[];
   edges: GraphEdge[];
   memoryTrails: MemoryTrailMap;
+  nodeDocumentSources?: Record<string, NodeDocumentSource>;
   onSelectNode: (id: string) => void;
 };
 
@@ -71,6 +80,7 @@ export function NodeDetail({
   nodes,
   edges,
   memoryTrails,
+  nodeDocumentSources,
   onSelectNode,
 }: NodeDetailProps) {
   const [showConnectForm, setShowConnectForm] = useState(false);
@@ -174,6 +184,28 @@ export function NodeDetail({
           <p className="text-xs leading-relaxed text-violet-100/80">
             {node.ai_reason}
           </p>
+        </div>
+      )}
+
+      {/* Document source — only for document_ai nodes */}
+      {node.origin === "document_ai" && nodeDocumentSources?.[node.id] && (
+        <div className="rounded-lg border border-dashed border-blue-400/40 bg-blue-950/15 p-3">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-blue-300/70">
+            Source
+          </p>
+          <p className="text-xs text-blue-100/80">
+            From {nodeDocumentSources[node.id].original_filename}
+          </p>
+          {nodeDocumentSources[node.id].source_excerpt && (
+            <blockquote className="mt-2 border-l-2 border-blue-400/40 pl-2 text-xs italic leading-relaxed text-blue-100/70">
+              &ldquo;{nodeDocumentSources[node.id].source_excerpt}&rdquo;
+            </blockquote>
+          )}
+          {node.ai_reason && (
+            <p className="mt-2 text-[11px] leading-relaxed text-blue-100/60">
+              {node.ai_reason}
+            </p>
+          )}
         </div>
       )}
 

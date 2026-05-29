@@ -55,9 +55,31 @@ Staged plan. Each stage should land in small commits and be usable end-to-end be
 - Simple text search across `memory_entries` and `nodes`.
 - Surface results that focus the canvas on the matching node.
 
+## Stage 8 — Document ingestion ✅
+
+- Migration `20260530000000_add_document_ingestion.sql`:
+  `source_documents`, `document_chunks`, `document_notes`, extends
+  `nodes.origin` CHECK with `'document_ai'`, private
+  `mindnode-documents` storage bucket with per-user folder policies.
+- Extraction in `src/lib/documents/extract.ts` for `.txt` / `.md`
+  (TextDecoder), `.pdf` (pdf-parse) and `.docx` (mammoth). 250k char cap.
+- Paragraph-aware chunker in `src/lib/documents/chunk.ts`
+  (target 1500 / max 1800 words, 30-chunk hard cap).
+- AI pipeline (`src/lib/ai/document-prompts.ts`,
+  `src/lib/ai/document-schema.ts`, `src/lib/documents/process.ts`):
+  Zod-validated note schema with single retry; anchored prompt that
+  bans invented facts and requires a literal `source_excerpt`.
+- `/api/documents/upload` route: validates, stores privately, extracts,
+  chunks, runs AI, creates nodes with `origin='document_ai'`, same-document
+  edges + conservative external links via `suggested_relationships`.
+- UI: header Documents button → list + upload sheet; node-detail shows
+  Document origin badge with source filename and quoted excerpt.
+
 ## Later (not scheduled)
 
-- Embedding-based related-node retrieval.
+- OCR for image-only PDFs.
+- Embedding-based related-node retrieval and document semantic search.
+- Background job queue for large documents.
 - Streaming AI suggestions.
 - Mobile-friendly layout.
 - Multi-step AI reasoning (retrieve → propose → critique).

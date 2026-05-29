@@ -57,6 +57,8 @@ export interface Database {
           category: string;
           position_x: number;
           position_y: number;
+          // "manual" | "memory" | "ai_pinned" | "imported" | "document_ai"
+          // — enforced by DB CHECK constraint.
           origin: string;
           ai_reason: string | null;
           created_at: string;
@@ -191,6 +193,181 @@ export interface Database {
           },
           {
             foreignKeyName: "ai_suggestions_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      source_documents: {
+        Row: {
+          id: string;
+          user_id: string;
+          filename: string;
+          original_filename: string;
+          mime_type: string;
+          file_size_bytes: number;
+          storage_path: string;
+          // "uploaded" | "extracting" | "extracted" | "processing" | "processed" | "failed"
+          status: string;
+          error_message: string | null;
+          extracted_text: string | null;
+          text_char_count: number | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          filename: string;
+          original_filename: string;
+          mime_type: string;
+          file_size_bytes: number;
+          storage_path: string;
+          status?: string;
+          error_message?: string | null;
+          extracted_text?: string | null;
+          text_char_count?: number | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          filename?: string;
+          original_filename?: string;
+          mime_type?: string;
+          file_size_bytes?: number;
+          storage_path?: string;
+          status?: string;
+          error_message?: string | null;
+          extracted_text?: string | null;
+          text_char_count?: number | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "source_documents_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      document_chunks: {
+        Row: {
+          id: string;
+          user_id: string;
+          document_id: string;
+          chunk_index: number;
+          content: string;
+          token_estimate: number | null;
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          document_id: string;
+          chunk_index: number;
+          content: string;
+          token_estimate?: number | null;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          document_id?: string;
+          chunk_index?: number;
+          content?: string;
+          token_estimate?: number | null;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_chunks_document_id_fkey";
+            columns: ["document_id"];
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "document_chunks_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      document_notes: {
+        Row: {
+          id: string;
+          user_id: string;
+          document_id: string;
+          chunk_id: string | null;
+          node_id: string | null;
+          title: string;
+          summary: string;
+          category: string;
+          source_excerpt: string | null;
+          confidence: number | null;
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          document_id: string;
+          chunk_id?: string | null;
+          node_id?: string | null;
+          title: string;
+          summary: string;
+          category?: string;
+          source_excerpt?: string | null;
+          confidence?: number | null;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          document_id?: string;
+          chunk_id?: string | null;
+          node_id?: string | null;
+          title?: string;
+          summary?: string;
+          category?: string;
+          source_excerpt?: string | null;
+          confidence?: number | null;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "document_notes_document_id_fkey";
+            columns: ["document_id"];
+            referencedRelation: "source_documents";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "document_notes_chunk_id_fkey";
+            columns: ["chunk_id"];
+            referencedRelation: "document_chunks";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "document_notes_node_id_fkey";
+            columns: ["node_id"];
+            referencedRelation: "nodes";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "document_notes_user_id_fkey";
             columns: ["user_id"];
             referencedRelation: "users";
             referencedColumns: ["id"];

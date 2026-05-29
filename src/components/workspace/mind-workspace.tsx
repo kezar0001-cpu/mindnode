@@ -6,12 +6,19 @@ import { Canvas, type GhostSuggestion } from "@/components/canvas/Canvas";
 import { NodeDetail } from "@/components/nodes/node-detail";
 import { ThoughtInputForm } from "@/components/input/thought-input-form";
 import { RecentThoughtsList } from "@/components/input/recent-thoughts-list";
+import { DocumentList } from "@/components/documents/document-list";
+import { DocumentUploadSheet } from "@/components/documents/document-upload-sheet";
 import { signOutAction } from "@/app/login/actions";
 import { pinGhostSuggestionAction } from "@/lib/graph/actions";
 import { deriveInsights, summarizeInsights, type Insight } from "@/lib/graph/insights";
 import type { GraphNode, GraphEdge } from "@/types";
-import type { MemoryTrailMap } from "@/lib/graph/queries";
+import type {
+  MemoryTrailMap,
+  NodeDocumentSource,
+  SourceDocument,
+} from "@/lib/graph/queries";
 import type { RecentMemoryEntry } from "@/lib/memory/queries";
+import { useRouter } from "next/navigation";
 
 type MindWorkspaceProps = {
   initialNodes: GraphNode[];
@@ -19,10 +26,20 @@ type MindWorkspaceProps = {
   memoryTrails: MemoryTrailMap;
   recentEntries: RecentMemoryEntry[];
   promotedMemoryIds: string[];
+  sourceDocuments: SourceDocument[];
+  nodeDocumentSources: Record<string, NodeDocumentSource>;
   userEmail: string;
 };
 
-type ActiveSheet = "composer" | "thoughts" | "detail" | "search" | "insights" | null;
+type ActiveSheet =
+  | "composer"
+  | "thoughts"
+  | "detail"
+  | "search"
+  | "insights"
+  | "documents"
+  | "upload"
+  | null;
 
 type ApiSuggestion = {
   title: string;
@@ -151,10 +168,14 @@ export function MindWorkspace({
   memoryTrails,
   recentEntries,
   promotedMemoryIds,
+  sourceDocuments,
+  nodeDocumentSources,
   userEmail,
 }: MindWorkspaceProps) {
+  const router = useRouter();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
+  const [uploadToast, setUploadToast] = useState<string | null>(null);
   const [ghosts, setGhosts] = useState<GhostSuggestion[]>([]);
   // ghostId -> real_node_id created when that ghost was pinned. Lets a
   // child ghost (whose parent has already been pinned) connect to the
@@ -691,6 +712,28 @@ export function MindWorkspace({
             </svg>
           </button>
 
+          {/* Documents — folder icon with count badge */}
+          <button
+            type="button"
+            onClick={() => openSheet("documents")}
+            aria-label="Documents"
+            className="relative flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
+          >
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+              <path
+                d="M1 3.5a1 1 0 0 1 1-1h3l1.2 1.2H11a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V3.5Z"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinejoin="round"
+              />
+            </svg>
+            {sourceDocuments.length > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-neutral-600 text-[8px] font-bold leading-none text-white">
+                {Math.min(sourceDocuments.length, 9)}
+              </span>
+            )}
+          </button>
+
           {/* Thoughts — list icon with count badge */}
           <button
             type="button"
@@ -843,6 +886,7 @@ export function MindWorkspace({
           nodes={initialNodes}
           edges={initialEdges}
           memoryTrails={memoryTrails}
+          nodeDocumentSources={nodeDocumentSources}
           onSelectNode={(id) => {
             setSelectedNodeId(id);
           }}
@@ -909,6 +953,57 @@ export function MindWorkspace({
           onSelectNode={handleNodeSelect}
         />
       </BottomSheet>
+
+      <BottomSheet
+        open={activeSheet === "documents"}
+        onClose={closeSheet}
+        title={`Documents (${sourceDocuments.length})`}
+      >
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => setActiveSheet("upload")}
+            className="block w-full rounded-md border border-teal-400/40 bg-teal-950/30 px-3 py-2 text-sm font-medium text-teal-200 hover:bg-teal-950/50"
+          >
+            Upload document
+          </button>
+          <DocumentList documents={sourceDocuments} />
+        </div>
+      </BottomSheet>
+
+      <BottomSheet
+        open={activeSheet === "upload"}
+        onClose={closeSheet}
+        title="Upload document"
+      >
+        <DocumentUploadSheet
+          onSuccess={({ notesCreated, filename }) => {
+            setUploadToast(
+              notesCreated > 0
+                ? `Added ${notesCreated} note${notesCreated === 1 ? "" : "s"} from ${filename}`
+                : `Saved ${filename}.`,
+            );
+            setActiveSheet("documents");
+            router.refresh();
+            // Auto-dismiss the toast after a beat.
+            setTimeout(() => setUploadToast(null), 4000);
+          }}
+        />
+      </BottomSheet>
+
+      {uploadToast && (
+        <div className="fixed bottom-24 left-1/2 z-40 flex max-w-[90vw] -translate-x-1/2 items-center gap-3 rounded-lg border border-emerald-500/40 bg-emerald-950/80 px-4 py-2 text-xs text-emerald-200 backdrop-blur">
+          <span className="line-clamp-2">{uploadToast}</span>
+          <button
+            type="button"
+            onClick={() => setUploadToast(null)}
+            aria-label="Dismiss"
+            className="shrink-0 text-emerald-300 hover:text-emerald-100"
+          >
+            ×
+          </button>
+        </div>
+      )}
     </div>
   );
 }
