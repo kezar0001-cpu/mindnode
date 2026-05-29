@@ -20,9 +20,10 @@ type ChunkOptions = {
   maxWords?: number;
 };
 
-const DEFAULT_TARGET = 1500;
-const DEFAULT_MAX = 1800;
-const HARD_CHUNK_CAP = 60;
+// Smaller target produces more focused chunks → more granular AI extraction.
+const DEFAULT_TARGET = 600;
+const DEFAULT_MAX = 900;
+const HARD_CHUNK_CAP = 120;
 
 function countWords(text: string): number {
   const t = text.trim();

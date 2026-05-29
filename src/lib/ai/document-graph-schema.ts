@@ -3,22 +3,27 @@ import "server-only";
 import { z } from "zod";
 
 // Section-level graph extraction. OpenAI Structured Outputs (strict mode)
-// requires every object to set additionalProperties:false and to list every
-// property in `required`. The JSON Schema below mirrors the Zod shape exactly.
+// requires every object to set additionalProperties:false and every property
+// in `required`. The JSON Schema below mirrors the Zod shape exactly.
 
 export const NODE_TYPES = [
   "section",
+  "concept",
   "topic",
   "fact",
   "goal",
   "project",
   "person",
+  "organisation",
   "risk",
   "decision",
   "task",
   "role",
   "event",
   "constraint",
+  "metric",
+  "date",
+  "principle",
 ] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 
@@ -43,6 +48,16 @@ export const GraphRelationshipSchema = z.object({
 });
 export type GraphExtractionRelationship = z.infer<typeof GraphRelationshipSchema>;
 
+// AI-suggested links to nodes that already exist in the user's graph.
+// The AI receives existing node titles and can nominate cross-links here.
+export const ExistingNodeLinkSchema = z.object({
+  existing_node_title: z.string().min(1).max(120),
+  new_node_stable_key: z.string().min(1).max(80),
+  relationship_type: z.string().min(1).max(40),
+  reason: z.string().min(1).max(280),
+});
+export type ExistingNodeLink = z.infer<typeof ExistingNodeLinkSchema>;
+
 export const GraphDiagnosticsSchema = z.object({
   coverage_notes: z.string().max(600),
   omitted_content_reason: z.string().max(280).nullable(),
@@ -51,14 +66,14 @@ export const GraphDiagnosticsSchema = z.object({
 export const SectionGraphSchema = z.object({
   section_title: z.string().min(1).max(120),
   section_summary: z.string().min(1).max(800),
-  nodes: z.array(GraphNodeSchema).min(0).max(20),
-  relationships: z.array(GraphRelationshipSchema).max(40),
+  nodes: z.array(GraphNodeSchema).min(0).max(30),
+  relationships: z.array(GraphRelationshipSchema).max(60),
+  existing_links: z.array(ExistingNodeLinkSchema).max(15),
   diagnostics: GraphDiagnosticsSchema,
 });
 export type SectionGraph = z.infer<typeof SectionGraphSchema>;
 
-// JSON Schema mirror for OpenAI Structured Outputs. Strict mode requires
-// additionalProperties:false on every object and every property in required.
+// JSON Schema mirror for OpenAI Structured Outputs (strict mode).
 export const SECTION_GRAPH_JSON_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -67,6 +82,7 @@ export const SECTION_GRAPH_JSON_SCHEMA: Record<string, unknown> = {
     "section_summary",
     "nodes",
     "relationships",
+    "existing_links",
     "diagnostics",
   ],
   properties: {
@@ -117,6 +133,25 @@ export const SECTION_GRAPH_JSON_SCHEMA: Record<string, unknown> = {
           relationship_type: { type: "string" },
           reason: { type: "string" },
           strength: { type: "number" },
+        },
+      },
+    },
+    existing_links: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "existing_node_title",
+          "new_node_stable_key",
+          "relationship_type",
+          "reason",
+        ],
+        properties: {
+          existing_node_title: { type: "string" },
+          new_node_stable_key: { type: "string" },
+          relationship_type: { type: "string" },
+          reason: { type: "string" },
         },
       },
     },

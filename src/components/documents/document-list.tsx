@@ -5,8 +5,10 @@ import { DocumentStatusCard } from "./document-status-card";
 
 export function DocumentList({
   documents,
+  onSelectNode,
 }: {
   documents: SourceDocument[];
+  onSelectNode?: (nodeId: string) => void;
 }) {
   if (documents.length === 0) {
     return (
@@ -21,7 +23,7 @@ export function DocumentList({
     <ul className="space-y-2">
       {documents.map((doc) => (
         <li key={doc.id}>
-          <DocumentStatusCard document={doc} />
+          <DocumentStatusCard document={doc} onSelectNode={onSelectNode} />
         </li>
       ))}
     </ul>

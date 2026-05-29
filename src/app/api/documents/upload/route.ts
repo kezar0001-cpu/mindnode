@@ -16,7 +16,7 @@ import { processDocumentGraph } from "@/lib/documents/process";
 // for large AI batches.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10MB
 const SUPPORTED_EXTENSIONS = new Set(["txt", "md", "pdf", "docx"]);
@@ -26,11 +26,15 @@ type UploadStatus = "processed" | "processed_with_warnings" | "failed";
 type UploadResponse = {
   ok: boolean;
   document_id?: string;
+  document_root_node_id?: string | null;
   section_count: number;
   chunk_count: number;
   nodes_created: number;
   edges_created: number;
   notes_created: number;
+  existing_nodes_linked: number;
+  duplicates_skipped: number;
+  processing_report: string;
   warnings_count: number;
   warnings: string[];
   status: UploadStatus;
@@ -67,6 +71,9 @@ function fail(error: string, status = 400, documentId?: string | null) {
       nodes_created: 0,
       edges_created: 0,
       notes_created: 0,
+      existing_nodes_linked: 0,
+      duplicates_skipped: 0,
+      processing_report: "",
       warnings_count: 0,
       warnings: [],
       status: "failed",
@@ -407,11 +414,15 @@ export async function POST(req: Request) {
     return jsonResponse({
       ok: true,
       document_id: documentId,
+      document_root_node_id: result.document_root_node_id,
       section_count: result.section_count,
       chunk_count: result.chunk_count,
       nodes_created: result.nodes_created,
       edges_created: result.edges_created,
       notes_created: result.notes_created,
+      existing_nodes_linked: result.existing_nodes_linked,
+      duplicates_skipped: result.duplicates_skipped,
+      processing_report: result.processing_report,
       warnings_count: warnings.length,
       warnings,
       status: finalStatus,
@@ -456,6 +467,9 @@ export async function POST(req: Request) {
             nodes_created: partial.nodes_created,
             edges_created: partial.edges_created,
             notes_created: partial.notes_created,
+            existing_nodes_linked: 0,
+            duplicates_skipped: 0,
+            processing_report: `Partial: ${partial.nodes_created} nodes from ${partial.section_count} sections.`,
             warnings_count: warnings.length,
             warnings,
             status: "processed_with_warnings",

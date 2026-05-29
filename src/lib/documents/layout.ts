@@ -13,9 +13,10 @@ export type DocumentClusterLayout = {
   ) => { position_x: number; position_y: number };
 };
 
-const SECTION_RADIUS = 360;
-const CHILD_RADIUS = 140;
-const CHILD_SWEEP_RAD = (270 * Math.PI) / 180;
+// Larger radii accommodate sections that now produce 15–25 child nodes each.
+const SECTION_RADIUS = 600;
+const CHILD_RADIUS = 240;
+const CHILD_SWEEP_RAD = (300 * Math.PI) / 180;
 
 export function computeDocumentClusterLayout(args: {
   sectionIds: string[];

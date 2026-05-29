@@ -23,6 +23,9 @@ export type ProcessResult = {
   nodes_created: number;
   edges_created: number;
   notes_created: number;
+  existing_nodes_linked: number;
+  duplicates_skipped: number;
+  processing_report: string;
   warnings: string[];
   diagnostics: Record<string, unknown>;
 };
@@ -56,6 +59,15 @@ function computeCentroid(
     sy += n.position_y;
   }
   return { x: sx / nodes.length, y: sy / nodes.length };
+}
+
+// Normalize a title for duplicate detection: lowercase, alphanum only, sorted words.
+function normalizeForDedup(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 async function extractSectionGraph(args: {
@@ -170,7 +182,16 @@ export async function processDocumentGraph(
       category: n.category,
     }),
   );
-  const existingTitlesForPrompt = existingNodes.map((n) => n.title);
+  // Pass up to 80 existing titles to the AI for link suggestions.
+  const existingTitlesForPrompt = existingNodes.slice(0, 80).map((n) => n.title);
+
+  // Build a lookup map for AI-suggested existing links: normalised title → id.
+  const existingTitleToId = new Map<string, string>();
+  for (const n of existingNodes) {
+    existingTitleToId.set(normalizeForDedup(n.title), n.id);
+    // Also key by exact title for case-insensitive match.
+    existingTitleToId.set(n.title.toLowerCase().trim(), n.id);
+  }
 
   const centroid = computeCentroid(
     existingNodes.slice(0, 8).map((n) => ({
@@ -180,7 +201,6 @@ export async function processDocumentGraph(
   );
 
   // ---- Pass 1: structural scaffold --------------------------------------
-  // Insert document_sections rows first so chunks can reference them.
   const sectionRows = args.sections.map((s) => ({
     id: s.id,
     user_id: args.userId,
@@ -204,7 +224,6 @@ export async function processDocumentGraph(
     }
   }
 
-  // Insert chunks with section metadata.
   const chunkRows = args.chunks.map((c) => ({
     user_id: args.userId,
     document_id: args.documentId,
@@ -232,7 +251,6 @@ export async function processDocumentGraph(
     chunkIdByIndex = new Map(data.map((d) => [d.chunk_index, d.id]));
   }
 
-  // Cluster layout for root + sections.
   const layout = computeDocumentClusterLayout({
     sectionIds: args.sections.map((s) => s.id),
     centerX: centroid.x,
@@ -304,7 +322,7 @@ export async function processDocumentGraph(
       .eq("user_id", args.userId);
   }
 
-  // Insert root -> section "contains" edges.
+  // Insert root → section "contains" edges.
   const containsRootEdges = [];
   for (const sec of args.sections) {
     const sNodeId = sectionNodeIdById.get(sec.id);
@@ -335,11 +353,23 @@ export async function processDocumentGraph(
   let notesCreated = 0;
   let aiCalls = 0;
   let aiFailures = 0;
+  let duplicatesSkipped = 0;
+  let existingNodesLinked = 0;
   const sectionsWithWarnings: number[] = [];
   let totalChars = 0;
   for (const s of args.sections) totalChars += s.char_count;
 
-  // Group chunks by section so we can iterate per-section.
+  // Track normalised titles of ALL document child nodes to prevent
+  // the same concept appearing twice across different chunks.
+  const seenDocNodeTitles = new Map<string, string>(); // normTitle → nodeId
+
+  // Also build a normalised lookup for the EXISTING user graph to catch
+  // exact-match duplicates before inserting.
+  const existingNormTitles = new Map<string, string>(); // normTitle → nodeId
+  for (const n of existingNodes) {
+    existingNormTitles.set(normalizeForDedup(n.title), n.id);
+  }
+
   const chunksBySection = new Map<string, SectionChunk[]>();
   for (const c of args.chunks) {
     const list = chunksBySection.get(c.section_id);
@@ -367,7 +397,7 @@ export async function processDocumentGraph(
         section,
         sectionCount: args.sections.length,
         chunk,
-        existingTitles: existingTitlesForPrompt.slice(0, 30),
+        existingTitles: existingTitlesForPrompt,
       });
       if (!graph) {
         aiFailures += 1;
@@ -378,17 +408,59 @@ export async function processDocumentGraph(
         continue;
       }
 
-      // Insert child nodes.
       const childNodeIdByStableKey = new Map<string, string>();
       const childOrder: { stableKey: string; nodeId: string }[] = [];
+
       for (let i = 0; i < graph.nodes.length; i++) {
         const node = graph.nodes[i];
+        const normTitle = normalizeForDedup(node.title);
+
+        // --- Cross-document exact-match dedup ---
+        // If an EXISTING user graph node has the same normalised title, link
+        // to it instead of creating a duplicate.
+        const existingExactId = existingNormTitles.get(normTitle);
+        if (existingExactId) {
+          existingNodesLinked++;
+          duplicatesSkipped++;
+          // Register under stable_key so intra-section relationships still resolve.
+          childNodeIdByStableKey.set(node.stable_key, existingExactId);
+          // Create a "mentions" edge from the section node to the existing node.
+          await supabase.from("edges").insert({
+            user_id: args.userId,
+            source_node_id: sectionNodeId,
+            target_node_id: existingExactId,
+            relationship_type: "mentions",
+            origin: "document_ai",
+          });
+          edgesCreated++;
+          continue;
+        }
+
+        // --- Intra-document dedup ---
+        // If a previous chunk in THIS document already created a node with
+        // the same normalised title, reuse it.
+        const seenId = seenDocNodeTitles.get(normTitle);
+        if (seenId) {
+          duplicatesSkipped++;
+          childNodeIdByStableKey.set(node.stable_key, seenId);
+          // Cross-reference edge from section to the already-created node.
+          await supabase.from("edges").insert({
+            user_id: args.userId,
+            source_node_id: sectionNodeId,
+            target_node_id: seenId,
+            relationship_type: "mentions",
+            origin: "document_ai",
+          });
+          edgesCreated++;
+          continue;
+        }
+
         const { position_x, position_y } = layout.childPositionFor(
           section.id,
           i,
           graph.nodes.length,
         );
-        const aiReason = `From ${args.documentTitle} → ${section.title}. Importance ${node.importance.toFixed(2)}.`;
+        const aiReason = `From "${args.documentTitle}" → "${section.title}". Importance ${node.importance.toFixed(2)}.`;
         const { data: insertedNode, error: nodeError } = await supabase
           .from("nodes")
           .insert({
@@ -413,8 +485,9 @@ export async function processDocumentGraph(
         sectionGotNodes = true;
         childNodeIdByStableKey.set(node.stable_key, insertedNode.id);
         childOrder.push({ stableKey: node.stable_key, nodeId: insertedNode.id });
+        seenDocNodeTitles.set(normTitle, insertedNode.id);
 
-        // document_notes row keeps the source excerpt + AI metadata.
+        // document_notes row for source provenance.
         const chunkId = chunkIdByIndex.get(chunk.chunk_index) ?? null;
         const { error: noteErr } = await supabase.from("document_notes").insert({
           user_id: args.userId,
@@ -438,7 +511,7 @@ export async function processDocumentGraph(
           notesCreated += 1;
         }
 
-        // Cross-document similarity links (conservative, max 2 per node).
+        // Soft token-overlap similarity links to existing graph (max 2 per node).
         const related = findRelatedExistingNodes({
           candidate: {
             title: node.title,
@@ -467,13 +540,15 @@ export async function processDocumentGraph(
             if (relErr) {
               warnings.push(`Failed to insert similarity edges: ${relErr.message}`);
             } else {
-              edgesCreated += relIns?.length ?? 0;
+              const count = relIns?.length ?? 0;
+              edgesCreated += count;
+              existingNodesLinked += count;
             }
           }
         }
       }
 
-      // Section -> child "contains" edges.
+      // Section → child "contains" edges.
       if (childOrder.length > 0) {
         const rows = childOrder.map((c) => ({
           user_id: args.userId,
@@ -521,6 +596,35 @@ export async function processDocumentGraph(
           }
         }
       }
+
+      // AI-suggested links to existing graph nodes.
+      if (graph.existing_links && graph.existing_links.length > 0) {
+        for (const link of graph.existing_links) {
+          const newNodeId = childNodeIdByStableKey.get(link.new_node_stable_key);
+          if (!newNodeId) continue;
+
+          // Resolve existing node by normalised or exact title.
+          const needle = link.existing_node_title.toLowerCase().trim();
+          const targetId =
+            existingTitleToId.get(needle) ||
+            existingTitleToId.get(normalizeForDedup(link.existing_node_title));
+          if (!targetId || targetId === newNodeId) continue;
+
+          const { error: linkErr } = await supabase.from("edges").insert({
+            user_id: args.userId,
+            source_node_id: newNodeId,
+            target_node_id: targetId,
+            relationship_type: truncate(link.relationship_type || "relates_to", 40),
+            origin: "document_ai",
+          });
+          if (linkErr) {
+            warnings.push(`Failed to insert AI existing link: ${linkErr.message}`);
+          } else {
+            edgesCreated++;
+            existingNodesLinked++;
+          }
+        }
+      }
     }
 
     if (!sectionGotNodes) {
@@ -538,11 +642,27 @@ export async function processDocumentGraph(
     );
   }
 
+  // ---- Processing report -----------------------------------------------
+  const linkedNote = existingNodesLinked > 0
+    ? `, ${existingNodesLinked} linked to existing graph`
+    : "";
+  const skipNote = duplicatesSkipped > 0
+    ? `, ${duplicatesSkipped} duplicates skipped`
+    : "";
+  const processing_report =
+    `${args.sections.length} section${args.sections.length !== 1 ? "s" : ""}, ` +
+    `${args.chunks.length} chunk${args.chunks.length !== 1 ? "s" : ""}. ` +
+    `${nodesCreated} node${nodesCreated !== 1 ? "s" : ""} created` +
+    `${linkedNote}${skipNote}. ` +
+    `${edgesCreated} edge${edgesCreated !== 1 ? "s" : ""} created.`;
+
   logDocumentGraph("completed", {
     documentId: args.documentId,
     nodesCreated,
     edgesCreated,
     notesCreated,
+    existingNodesLinked,
+    duplicatesSkipped,
     warnings: warnings.length,
     aiCalls,
     aiFailures,
@@ -554,6 +674,8 @@ export async function processDocumentGraph(
   diagnostics.low_yield = lowYield;
   diagnostics.total_chars = totalChars;
   diagnostics.total_child_nodes = totalChildNodes;
+  diagnostics.duplicates_skipped = duplicatesSkipped;
+  diagnostics.existing_nodes_linked = existingNodesLinked;
 
   return {
     document_root_node_id: rootNodeId,
@@ -562,6 +684,9 @@ export async function processDocumentGraph(
     nodes_created: nodesCreated,
     edges_created: edgesCreated,
     notes_created: notesCreated,
+    existing_nodes_linked: existingNodesLinked,
+    duplicates_skipped: duplicatesSkipped,
+    processing_report,
     warnings,
     diagnostics,
   };
