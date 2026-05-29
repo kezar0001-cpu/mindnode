@@ -5,6 +5,7 @@ import {
 } from "@/lib/memory/queries";
 import {
   listEdges,
+  listDocumentNodeMembership,
   listNodeDocumentSources,
   listNodeMemoryTrails,
   listNodes,
@@ -28,10 +29,12 @@ export default async function HomePage() {
     ]);
 
   const nodeIds = nodes.map((n) => n.id);
-  const [memoryTrails, nodeDocumentSources] = await Promise.all([
-    listNodeMemoryTrails(nodeIds),
-    listNodeDocumentSources(nodeIds),
-  ]);
+  const [memoryTrails, nodeDocumentSources, documentNodeMembership] =
+    await Promise.all([
+      listNodeMemoryTrails(nodeIds),
+      listNodeDocumentSources(nodeIds),
+      listDocumentNodeMembership(),
+    ]);
 
   return (
     <MindWorkspace
@@ -42,6 +45,7 @@ export default async function HomePage() {
       promotedMemoryIds={promotedMemoryIds}
       sourceDocuments={sourceDocuments}
       nodeDocumentSources={nodeDocumentSources}
+      documentNodeMembership={documentNodeMembership}
       userEmail={user.email ?? ""}
     />
   );

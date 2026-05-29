@@ -95,6 +95,13 @@ type NodeDetailProps = {
   onSelectNode: (id: string) => void;
   onNodeDeleted: () => void;
   onAskAboutNode?: (node: { id: string; title: string }, prompt: string) => void;
+  onShowNeighbours?: (id: string) => void;
+  onExpandBranch?: (id: string) => void;
+  onHideUnrelated?: () => void;
+  onExploreWithAI?: (id: string) => void;
+  documentMembership?: Record<string, string>;
+  expandedDocumentIds?: Set<string>;
+  onToggleDocument?: (documentId: string) => void;
 };
 
 export function NodeDetail({
@@ -106,6 +113,13 @@ export function NodeDetail({
   onSelectNode,
   onNodeDeleted,
   onAskAboutNode,
+  onShowNeighbours,
+  onExpandBranch,
+  onHideUnrelated,
+  onExploreWithAI,
+  documentMembership,
+  expandedDocumentIds,
+  onToggleDocument,
 }: NodeDetailProps) {
   const router = useRouter();
 
@@ -334,6 +348,96 @@ export function NodeDetail({
           )}
         </div>
       </div>
+
+      {/* Document expand / collapse — only for document root nodes */}
+      {!editMode &&
+        node.origin === "document_root" &&
+        onToggleDocument &&
+        documentMembership?.[node.id] && (
+          <div className="rounded-lg border border-blue-400/30 bg-blue-950/15 p-3">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-blue-300/70">
+              Document
+            </p>
+            <p className="text-xs text-blue-100/80">
+              This document&apos;s sections and concepts are{" "}
+              {expandedDocumentIds?.has(documentMembership[node.id])
+                ? "expanded on the canvas."
+                : "collapsed. Expand to explore them."}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => onToggleDocument(documentMembership[node.id])}
+                className="rounded-full border border-blue-400/40 bg-blue-950/30 px-2.5 py-1 text-[11px] font-medium text-blue-200 hover:bg-blue-950/60"
+              >
+                {expandedDocumentIds?.has(documentMembership[node.id])
+                  ? "Collapse document"
+                  : "Expand document"}
+              </button>
+              {onShowNeighbours && (
+                <button
+                  type="button"
+                  onClick={() => onShowNeighbours(node.id)}
+                  className="rounded-full border border-blue-400/40 bg-blue-950/30 px-2.5 py-1 text-[11px] font-medium text-blue-200 hover:bg-blue-950/60"
+                >
+                  Show sections
+                </button>
+              )}
+              {onExpandBranch && (
+                <button
+                  type="button"
+                  onClick={() => onExpandBranch(node.id)}
+                  className="rounded-full border border-blue-400/40 bg-blue-950/30 px-2.5 py-1 text-[11px] font-medium text-blue-200 hover:bg-blue-950/60"
+                >
+                  Show key concepts
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+      {/* Exploration controls — make the graph navigable, not a wall of nodes */}
+      {!editMode &&
+        (onShowNeighbours || onExpandBranch || onHideUnrelated || onExploreWithAI) && (
+          <div className="flex flex-wrap gap-1.5">
+            {onShowNeighbours && (
+              <button
+                type="button"
+                onClick={() => onShowNeighbours(node.id)}
+                className="rounded-full border border-canvas-border bg-canvas-bg px-2.5 py-1 text-[11px] font-medium text-neutral-300 hover:border-teal-300/40 hover:text-teal-300"
+              >
+                Show neighbours
+              </button>
+            )}
+            {onExpandBranch && (
+              <button
+                type="button"
+                onClick={() => onExpandBranch(node.id)}
+                className="rounded-full border border-canvas-border bg-canvas-bg px-2.5 py-1 text-[11px] font-medium text-neutral-300 hover:border-teal-300/40 hover:text-teal-300"
+              >
+                Expand branch
+              </button>
+            )}
+            {onHideUnrelated && (
+              <button
+                type="button"
+                onClick={onHideUnrelated}
+                className="rounded-full border border-canvas-border bg-canvas-bg px-2.5 py-1 text-[11px] font-medium text-neutral-300 hover:border-teal-300/40 hover:text-teal-300"
+              >
+                Hide unrelated
+              </button>
+            )}
+            {onExploreWithAI && (
+              <button
+                type="button"
+                onClick={() => onExploreWithAI(node.id)}
+                className="rounded-full border border-violet-400/40 bg-violet-950/30 px-2.5 py-1 text-[11px] font-medium text-violet-200 hover:bg-violet-950/60"
+              >
+                Explore with AI
+              </button>
+            )}
+          </div>
+        )}
 
       {/* Companion actions — open a node-focused chat with a prepared prompt */}
       {!editMode && onAskAboutNode && (

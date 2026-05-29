@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { reconcileStaleDocuments } from "@/lib/documents/reconcile";
 import type { GraphNode, GraphEdge } from "@/types";
 
 export type MemoryTrailEntry = {
@@ -96,6 +97,12 @@ export type NodeDocumentSource = {
 
 export async function listSourceDocuments(): Promise<SourceDocument[]> {
   const supabase = await createSupabaseServerClient();
+
+  // Recover any documents stuck "Working…" before reading the list, so a
+  // crashed-late pipeline shows as recovered instead of perpetually working.
+  await reconcileStaleDocuments(supabase).catch((err) => {
+    console.error("Stale document reconciliation failed:", err);
+  });
 
   const { data: docs, error: docsErr } = await supabase
     .from("source_documents")
@@ -207,5 +214,40 @@ export async function listNodeDocumentSourceDetails(
   for (const [nodeId, src] of Object.entries(base)) {
     out[nodeId] = { ...src, ai_reason: reasonById.get(nodeId) ?? null };
   }
+  return out;
+}
+
+// Maps every document-owned node (root, section, concept) to its document id.
+// Lets the client collapse/expand a document's subtree on the canvas without
+// loading the whole document graph structure.
+export async function listDocumentNodeMembership(): Promise<
+  Record<string, string>
+> {
+  const supabase = await createSupabaseServerClient();
+  const out: Record<string, string> = {};
+
+  const { data: docs } = await supabase
+    .from("source_documents")
+    .select("id, document_root_node_id");
+  for (const d of docs ?? []) {
+    if (d.document_root_node_id) out[d.document_root_node_id] = d.id;
+  }
+
+  const { data: sections } = await supabase
+    .from("document_sections")
+    .select("node_id, document_id")
+    .not("node_id", "is", null);
+  for (const s of sections ?? []) {
+    if (s.node_id) out[s.node_id] = s.document_id;
+  }
+
+  const { data: notes } = await supabase
+    .from("document_notes")
+    .select("node_id, document_id")
+    .not("node_id", "is", null);
+  for (const n of notes ?? []) {
+    if (n.node_id) out[n.node_id] = n.document_id;
+  }
+
   return out;
 }
