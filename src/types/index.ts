@@ -19,6 +19,9 @@ export interface MemoryEntry {
   created_at: ISODateString;
 }
 
+export type NodeOrigin = "manual" | "memory" | "ai_pinned" | "imported";
+export type EdgeOrigin = "manual" | "auto_keyword" | "ai_pinned" | "ai_suggested";
+
 export interface GraphNode {
   id: UUID;
   user_id: UUID;
@@ -27,6 +30,8 @@ export interface GraphNode {
   category: string;
   position_x: number;
   position_y: number;
+  origin: NodeOrigin | string;
+  ai_reason: string | null;
   created_at: ISODateString;
   updated_at: ISODateString;
 }
@@ -39,6 +44,7 @@ export interface GraphEdge {
   relationship_type: string;
   label: string | null;
   strength: number;
+  origin: EdgeOrigin | string;
   created_at: ISODateString;
 }
 
