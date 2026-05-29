@@ -53,19 +53,48 @@ The app shell is mobile-first. On phones (the primary target) `/` is a single-co
 
 ## Document ingestion
 
-You can upload a `.txt`, `.md`, `.pdf` (text-based) or `.docx` file and the AI
-will extract structured notes that become new nodes on your canvas.
+You can upload a `.txt`, `.md`, `.pdf` (text-based) or `.docx` file. The AI
+parses it into sections and produces a **knowledge graph**, not a summary.
 
 - **Supported types**: `.txt`, `.md`, `.pdf` (text-based, no OCR yet), `.docx`.
   `.doc` is not supported — please convert to `.docx` first.
 - **Limits**: 10MB per file; up to 250,000 characters of extracted text; up
-  to 30 chunks of ~1,500 words each.
+  to 60 chunks of ~1,500 words each.
 - **Storage**: files land in the `mindnode-documents` Supabase Storage bucket.
   The migration creates this bucket as **private**. If you create it manually
   in the Supabase dashboard, make sure the bucket is **not** public.
-- **Provenance**: each generated node carries `origin = 'document_ai'` and
-  stores its source filename plus a literal excerpt from the chunk it came
-  from. Same-document nodes are auto-linked with a `same_document` edge.
+- **Graph shape**: every upload produces
+  - one `document_root` node (the file),
+  - one `document_section` node per detected section (Markdown headings,
+    ALL-CAPS lines, Title-Case lines, etc.),
+  - 3–10 `document_ai` child nodes per medium/large section,
+  - `contains` edges from root → section → child,
+  - typed semantic edges between siblings (`depends_on`, `leads_to`,
+    `supports`, `conflicts_with`, …) and conservative `relates_to` links
+    to existing graph nodes when there is real overlap.
+- **Provenance**: every node stores its source filename, section title,
+  literal source excerpt, and AI `node_type` (project/goal/task/role/…).
+- **Diagnostics**: the source document row stores `section_count`,
+  `chunk_count`, `nodes_created`, `edges_created`, and a `warnings` array.
+  Low-yield uploads are flagged `processed_with_warnings`.
+
+### Model router
+
+Each AI task picks its own model so you can balance quality and cost. The
+order of resolution is: `AI_MODEL_<TASK>` → `AI_PROVIDER_MODEL` → built-in
+default.
+
+| Task                  | Default          | Env var                          |
+| --------------------- | ---------------- | -------------------------------- |
+| `document_graph`      | `gpt-4.1`        | `AI_MODEL_DOCUMENT_GRAPH`        |
+| `document_graph_fast` | `gpt-4o-mini`    | `AI_MODEL_DOCUMENT_GRAPH_FAST`   |
+| `ghost_explore`       | `gpt-4o-mini`    | `AI_MODEL_GHOST_EXPLORE`         |
+| `deep_explore`        | `gpt-4.1`        | `AI_MODEL_DEEP_EXPLORE`          |
+
+`document_graph` runs first against each section using OpenAI **Structured
+Outputs** (`json_schema`, `strict: true`). On a parse failure or empty
+extraction the processor retries on `document_graph_fast`, and as a last
+fallback drops to JSON mode on the fast model.
 
 ## Status
 

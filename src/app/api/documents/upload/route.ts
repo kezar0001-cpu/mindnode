@@ -7,8 +7,9 @@ import {
   SUPPORTED_MIME_TYPES,
   extractTextFromFile,
 } from "@/lib/documents/extract";
-import { chunkText } from "@/lib/documents/chunk";
-import { processDocumentChunks } from "@/lib/documents/process";
+import { chunkSections } from "@/lib/documents/chunk";
+import { parseDocumentStructure } from "@/lib/documents/structure";
+import { processDocumentGraph } from "@/lib/documents/process";
 
 // Node runtime — pdf-parse and mammoth are Node-only. force-dynamic so
 // auth cookies are read fresh on every request. maxDuration lifted to 60s
@@ -83,7 +84,6 @@ export async function POST(req: Request) {
         original_filename: file.name,
         mime_type: file.type || "application/octet-stream",
         file_size_bytes: file.size,
-        // Placeholder path; we update once we know the document id.
         storage_path: "",
         status: "uploaded",
       })
@@ -138,8 +138,6 @@ export async function POST(req: Request) {
       return fail(extraction.error);
     }
 
-    // Cast metadata to JSON-compatible structure for the DB layer; the
-    // extractor only puts primitives in the object.
     const safeMetadata = JSON.parse(JSON.stringify(extraction.metadata));
     await supabase
       .from("source_documents")
@@ -152,8 +150,21 @@ export async function POST(req: Request) {
       .eq("id", documentId)
       .eq("user_id", user.id);
 
-    // 4. Chunk and persist chunks.
-    const chunks = chunkText(extraction.text);
+    // 4. Parse structure → sections, then chunk per section.
+    const { document_title, sections } = parseDocumentStructure(extraction.text);
+    if (sections.length === 0) {
+      await supabase
+        .from("source_documents")
+        .update({
+          status: "failed",
+          error_message: "No usable content found in document.",
+        })
+        .eq("id", documentId)
+        .eq("user_id", user.id);
+      return fail("No usable content found in document.");
+    }
+
+    const chunks = chunkSections(sections);
     if (chunks.length === 0) {
       await supabase
         .from("source_documents")
@@ -166,54 +177,39 @@ export async function POST(req: Request) {
       return fail("No usable content found in document.");
     }
 
-    const chunkRows = chunks.map((c, idx) => ({
-      user_id: user.id,
-      document_id: documentId!,
-      chunk_index: idx,
-      content: c.content,
-      token_estimate: c.token_estimate,
-    }));
-    const { data: insertedChunks, error: chunkErr } = await supabase
-      .from("document_chunks")
-      .insert(chunkRows)
-      .select("id, chunk_index, content");
-    if (chunkErr || !insertedChunks) {
-      console.error("Failed to insert chunks:", chunkErr?.message);
-      await supabase
-        .from("source_documents")
-        .update({
-          status: "failed",
-          error_message: "Could not persist chunks.",
-        })
-        .eq("id", documentId)
-        .eq("user_id", user.id);
-      return fail("Could not process file. Please try again.", 500);
-    }
-
+    // 5. Mark processing and record section/chunk counts up-front.
     await supabase
       .from("source_documents")
-      .update({ status: "processing" })
+      .update({
+        status: "processing",
+        section_count: sections.length,
+        chunk_count: chunks.length,
+      })
       .eq("id", documentId)
       .eq("user_id", user.id);
 
-    // 5. AI per-chunk → nodes + edges + document_notes.
-    const sortedChunks = [...insertedChunks].sort(
-      (a, b) => a.chunk_index - b.chunk_index,
-    );
-    const result = await processDocumentChunks({
-      documentId: documentId,
+    // 6. Two-pass graph extraction (sections + chunks written inside).
+    const result = await processDocumentGraph({
+      documentId,
       userId: user.id,
       filename: file.name,
-      chunks: sortedChunks.map((c) => ({
-        id: c.id,
-        chunk_index: c.chunk_index,
-        content: c.content,
-      })),
+      documentTitle: document_title,
+      sections,
+      chunks,
     });
 
+    const warnings = result.warnings;
+    const finalStatus = warnings.length > 0 ? "processed_with_warnings" : "processed";
     await supabase
       .from("source_documents")
-      .update({ status: "processed" })
+      .update({
+        status: finalStatus,
+        document_root_node_id: result.document_root_node_id,
+        nodes_created: result.nodes_created,
+        edges_created: result.edges_created,
+        diagnostics: JSON.parse(JSON.stringify(result.diagnostics)),
+        warnings: warnings,
+      })
       .eq("id", documentId)
       .eq("user_id", user.id);
 
@@ -222,9 +218,13 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       document_id: documentId,
-      notes_created: result.notes_created,
+      section_count: result.section_count,
+      chunk_count: result.chunk_count,
       nodes_created: result.nodes_created,
       edges_created: result.edges_created,
+      notes_created: result.notes_created,
+      warnings_count: warnings.length,
+      status: finalStatus,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

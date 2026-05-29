@@ -77,6 +77,12 @@ export type SourceDocument = {
   status: string;
   error_message: string | null;
   notes_created: number;
+  section_count: number;
+  chunk_count: number;
+  nodes_created: number;
+  edges_created: number;
+  warnings_count: number;
+  document_root_node_id: string | null;
   created_at: string;
 };
 
@@ -84,6 +90,8 @@ export type NodeDocumentSource = {
   document_id: string;
   original_filename: string;
   source_excerpt: string | null;
+  node_type: string | null;
+  source_section_title: string | null;
 };
 
 export async function listSourceDocuments(): Promise<SourceDocument[]> {
@@ -91,7 +99,9 @@ export async function listSourceDocuments(): Promise<SourceDocument[]> {
 
   const { data: docs, error: docsErr } = await supabase
     .from("source_documents")
-    .select("id, original_filename, mime_type, status, error_message, created_at")
+    .select(
+      "id, original_filename, mime_type, status, error_message, section_count, chunk_count, nodes_created, edges_created, warnings, document_root_node_id, created_at",
+    )
     .order("created_at", { ascending: false })
     .limit(50);
   if (docsErr) throw new Error(`Failed to load documents: ${docsErr.message}`);
@@ -110,21 +120,32 @@ export async function listSourceDocuments(): Promise<SourceDocument[]> {
     counts[n.document_id] = (counts[n.document_id] ?? 0) + 1;
   }
 
-  return list.map((d) => ({
-    id: d.id,
-    original_filename: d.original_filename,
-    mime_type: d.mime_type,
-    status: d.status,
-    error_message: d.error_message,
-    created_at: d.created_at,
-    notes_created: counts[d.id] ?? 0,
-  }));
+  return list.map((d) => {
+    const warnings = Array.isArray(d.warnings) ? d.warnings : [];
+    return {
+      id: d.id,
+      original_filename: d.original_filename,
+      mime_type: d.mime_type,
+      status: d.status,
+      error_message: d.error_message,
+      created_at: d.created_at,
+      notes_created: counts[d.id] ?? 0,
+      section_count: d.section_count ?? 0,
+      chunk_count: d.chunk_count ?? 0,
+      nodes_created: d.nodes_created ?? 0,
+      edges_created: d.edges_created ?? 0,
+      warnings_count: warnings.length,
+      document_root_node_id: d.document_root_node_id ?? null,
+    };
+  });
 }
 
 type DocumentNoteJoin = {
   node_id: string | null;
   document_id: string;
   source_excerpt: string | null;
+  node_type: string | null;
+  source_section_title: string | null;
   source_documents: { original_filename: string } | null;
 };
 
@@ -137,7 +158,7 @@ export async function listNodeDocumentSources(
   const { data, error } = await supabase
     .from("document_notes")
     .select(
-      "node_id, document_id, source_excerpt, source_documents(original_filename)",
+      "node_id, document_id, source_excerpt, node_type, source_section_title, source_documents(original_filename)",
     )
     .in("node_id", nodeIds);
 
@@ -153,7 +174,38 @@ export async function listNodeDocumentSources(
       document_id: row.document_id,
       original_filename: row.source_documents?.original_filename ?? "document",
       source_excerpt: row.source_excerpt,
+      node_type: row.node_type,
+      source_section_title: row.source_section_title,
     };
+  }
+  return out;
+}
+
+// Richer per-node provenance: ai_reason from nodes + node_type + section title.
+export type NodeDocumentSourceDetail = NodeDocumentSource & {
+  ai_reason: string | null;
+};
+
+export async function listNodeDocumentSourceDetails(
+  nodeIds: string[],
+): Promise<Record<string, NodeDocumentSourceDetail>> {
+  if (nodeIds.length === 0) return {};
+
+  const supabase = await createSupabaseServerClient();
+  const base = await listNodeDocumentSources(nodeIds);
+  const { data: nodeRows, error } = await supabase
+    .from("nodes")
+    .select("id, ai_reason")
+    .in("id", nodeIds);
+  if (error) {
+    throw new Error(`Failed to load node ai_reasons: ${error.message}`);
+  }
+  const reasonById = new Map<string, string | null>();
+  for (const r of nodeRows ?? []) reasonById.set(r.id, r.ai_reason ?? null);
+
+  const out: Record<string, NodeDocumentSourceDetail> = {};
+  for (const [nodeId, src] of Object.entries(base)) {
+    out[nodeId] = { ...src, ai_reason: reasonById.get(nodeId) ?? null };
   }
   return out;
 }
