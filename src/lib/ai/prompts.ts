@@ -2,40 +2,48 @@ import "server-only";
 
 type GraphContextNode = { title: string; summary: string; category: string };
 
+export type ExplorationMode = "explore" | "bridge" | "gap";
+
 export type ExplorationPromptInput = {
+  mode: ExplorationMode;
   selectedNode?: GraphContextNode;
   explorationContext?: GraphContextNode;
   rootNode?: GraphContextNode;
+  bridgeAnchorA?: GraphContextNode;
+  bridgeAnchorB?: GraphContextNode;
   connectedNodes: GraphContextNode[];
   recentNodes: GraphContextNode[];
   recentMemorySnippets: string[];
   visibleGhostTitles: string[];
 };
 
-const SYSTEM = `You are an exploration companion inside MindNode, a personal thought graph.
+const SYSTEM_BASE = `You are an exploration companion inside MindNode, a personal thought graph.
 
-YOUR JOB
-Generate 4 to 6 NEW THOUGHT AVENUES that branch DIRECTLY from THE ANCHOR provided below. Each suggestion must be a direct continuation of the anchor — a more specific question, a next step, a risk, a blocker, a deeper angle, an adjacent angle, or a counter-perspective. If a suggestion cannot be tied to a specific phrase or concept in the anchor, DO NOT include it.
-
-OUTPUT
-Return ONLY valid JSON in the shape { "suggestions": [...] }. No markdown, no prose outside JSON.
+CORE RULES (always apply)
+- Output ONLY valid JSON: { "suggestions": [...] }.
+- No markdown. No prose outside the JSON.
+- Every suggestion must be anchored. If you cannot tie a suggestion to a specific phrase in THE ANCHOR (or in the two bridge anchors when in BRIDGE mode), do not include it.
+- Prefer fewer strong suggestions over many weak ones. 3 strong suggestions beat 6 generic ones.
 
 EACH SUGGESTION FIELD
-- title: 3-8 words. Concrete, anchor-specific. Avoid generic categories.
+- title: 3-8 words, concrete, anchor-specific. No generic categories.
 - summary: 1-2 sentences explaining the avenue.
-- category: one or two words (e.g. "risk", "blocker", "evidence", "decision", "reflection", "people").
-- relationship_type: short label ("related", "supports", "challenges", "depends on", "extends", "questions").
-- reason: 1 sentence that explicitly cites a phrase or concept FROM THE ANCHOR.
-- confidence: 0..1, your honest estimate of how directly this branches from the anchor. Use < 0.45 for weak ties.
+- category: one or two words (e.g. "risk", "blocker", "evidence", "decision", "reflection", "people", "bridge_question").
+- relationship_type: short label. Allowed: "related", "supports", "challenges", "depends on", "extends", "questions", "bridge_question".
+- reason: 1 sentence that explicitly cites a phrase or concept FROM THE ANCHOR (or both anchors in BRIDGE mode).
+- confidence: 0..1, your honest estimate of how directly this branches from the anchor. Use < 0.45 for weak ties — those will be filtered out.
 
-EXAMPLES
-Suppose THE ANCHOR is: "I want to finish the western carpark by end of next week"
+ANCHOR-DRIVEN BRANCH KINDS (use these as your scaffolding)
+Useful avenues for any anchor include: next steps, blockers, risks, dependencies, decisions, evidence, follow-up questions, hidden branches, structural gaps. Pick the kinds that fit the anchor — don't force all of them.
 
-BAD titles (do NOT produce these):
+EXAMPLES (mode: explore)
+ANCHOR: "I want to finish the western carpark by end of next week"
+
+BAD titles:
 - "Budget considerations"               (generic; budget isn't mentioned)
-- "Post-carpark project ideas"          (not a branch of THIS thought)
-- "Timeline for future projects"        (drifts away from anchor)
-- "How this connects to work goals"     (vague, not anchored)
+- "Post-carpark project ideas"          (drifts away)
+- "Timeline for future projects"        (drifts away)
+- "How this connects to work goals"     (vague)
 
 GOOD titles:
 - "What must be done before handover?"
@@ -45,18 +53,17 @@ GOOD titles:
 - "Evidence to capture before sign-off"
 
 AVOID
-- Duplicating any thought in RECENT THOUGHTS.
-- Duplicating any title in VISIBLE GHOST AVENUES.
+- Duplicating any RECENT THOUGHTS title.
+- Duplicating any VISIBLE GHOST AVENUES title.
 - Empty, single-word, or pure-category titles.
-- Anything not anchored in the anchor's actual content.`;
+- Topics not present in the anchor.`;
 
 function describeNode(n: GraphContextNode): string {
   return `- ${n.title} [${n.category}]: ${n.summary}`;
 }
 
-export function buildExplorationMessages(input: ExplorationPromptInput) {
+function buildExploreBody(input: ExplorationPromptInput): string[] {
   const parts: string[] = [];
-
   if (input.explorationContext) {
     parts.push(
       `THE ANCHOR — every suggestion must branch DIRECTLY from this:\n${describeNode(input.explorationContext)}`,
@@ -75,6 +82,46 @@ export function buildExplorationMessages(input: ExplorationPromptInput) {
       `No specific anchor. Suggest open avenues across the user's graph as a whole. Each suggestion must still be specific.`,
     );
   }
+  return parts;
+}
+
+function buildBridgeBody(input: ExplorationPromptInput): string[] {
+  const parts: string[] = [];
+  parts.push(
+    `MODE: BRIDGE. The user's graph has two thoughts that sit in separate clusters. Propose 3-5 "bridge questions" — short questions whose answers would create a meaningful link between them. relationship_type MUST be "bridge_question" for every suggestion. Each suggestion's reason must cite a phrase from BOTH anchors.`,
+  );
+  if (input.bridgeAnchorA) {
+    parts.push(`ANCHOR A:\n${describeNode(input.bridgeAnchorA)}`);
+  }
+  if (input.bridgeAnchorB) {
+    parts.push(`ANCHOR B:\n${describeNode(input.bridgeAnchorB)}`);
+  }
+  return parts;
+}
+
+function buildGapBody(input: ExplorationPromptInput): string[] {
+  const parts: string[] = [];
+  parts.push(
+    `MODE: GAP. The user has an isolated thought with no connections in the graph. Propose 3-5 avenues that would help connect this thought to other thinking — questions, related angles, or concrete next steps that invite linkage. relationship_type should be "related" or "extends".`,
+  );
+  if (input.selectedNode) {
+    parts.push(
+      `THE ISOLATED THOUGHT — every suggestion must branch DIRECTLY from this:\n${describeNode(input.selectedNode)}`,
+    );
+  }
+  return parts;
+}
+
+export function buildExplorationMessages(input: ExplorationPromptInput) {
+  const parts: string[] = [];
+
+  if (input.mode === "bridge") {
+    parts.push(...buildBridgeBody(input));
+  } else if (input.mode === "gap") {
+    parts.push(...buildGapBody(input));
+  } else {
+    parts.push(...buildExploreBody(input));
+  }
 
   if (input.connectedNodes.length > 0) {
     parts.push(
@@ -86,7 +133,7 @@ export function buildExplorationMessages(input: ExplorationPromptInput) {
 
   if (input.recentNodes.length > 0) {
     parts.push(
-      `RECENT THOUGHTS (avoid duplicating these):\n${input.recentNodes
+      `RECENT THOUGHTS (avoid duplicating these titles):\n${input.recentNodes
         .slice(0, 8)
         .map(describeNode)
         .join("\n")}`,
@@ -110,10 +157,16 @@ export function buildExplorationMessages(input: ExplorationPromptInput) {
     );
   }
 
-  parts.push(`Return JSON with 4 to 6 anchored suggestions following the schema.`);
+  parts.push(
+    input.mode === "bridge"
+      ? `Return JSON with 3 to 5 bridge_question suggestions.`
+      : input.mode === "gap"
+        ? `Return JSON with 3 to 5 anchored suggestions that help link this thought to the graph.`
+        : `Return JSON with 4 to 6 anchored suggestions following the schema.`,
+  );
 
   return [
-    { role: "system" as const, content: SYSTEM },
+    { role: "system" as const, content: SYSTEM_BASE },
     { role: "user" as const, content: parts.join("\n\n") },
   ];
 }

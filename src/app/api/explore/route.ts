@@ -3,12 +3,13 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { generateExplorationSuggestions } from "@/lib/ai";
-import type { ExplorationPromptInput } from "@/lib/ai/prompts";
+import type { ExplorationPromptInput, ExplorationMode } from "@/lib/ai/prompts";
 import type { ExplorationSuggestion } from "@/lib/ai/schema";
 
 export const dynamic = "force-dynamic";
 
 type ExploreBody = {
+  mode?: ExplorationMode;
   selected_node_id?: string;
   exploration_context?: {
     ghost_id?: string;
@@ -17,6 +18,10 @@ type ExploreBody = {
     category?: string;
     parent_ghost_id?: string;
     root_node_id?: string;
+  };
+  bridge_anchors?: {
+    a_node_id: string;
+    b_node_id: string;
   };
   visible_ghost_titles?: string[];
 };
@@ -53,8 +58,10 @@ export async function POST(req: Request) {
     const supabase = await createSupabaseServerClient();
 
     const body = (await req.json().catch(() => ({}))) as ExploreBody;
+    const mode: ExplorationMode = body.mode ?? "explore";
 
     const promptInput: ExplorationPromptInput = {
+      mode,
       connectedNodes: [],
       recentNodes: [],
       recentMemorySnippets: [],
@@ -63,15 +70,28 @@ export async function POST(req: Request) {
         .filter(Boolean),
     };
 
-    // Immediate anchor: ghost takes precedence over real node.
-    if (body.exploration_context) {
+    // Bridge mode — load both anchor nodes by id.
+    if (mode === "bridge" && body.bridge_anchors) {
+      const ids = [body.bridge_anchors.a_node_id, body.bridge_anchors.b_node_id];
+      const { data: anchors } = await supabase
+        .from("nodes")
+        .select("id, title, summary, category")
+        .in("id", ids)
+        .eq("user_id", user.id);
+      if (anchors && anchors.length === 2) {
+        const byId = new Map(anchors.map((a) => [a.id, a]));
+        const a = byId.get(body.bridge_anchors.a_node_id);
+        const b = byId.get(body.bridge_anchors.b_node_id);
+        if (a) promptInput.bridgeAnchorA = { title: a.title, summary: a.summary, category: a.category };
+        if (b) promptInput.bridgeAnchorB = { title: b.title, summary: b.summary, category: b.category };
+      }
+    } else if (body.exploration_context) {
+      // Immediate anchor: ghost takes precedence over real node.
       promptInput.explorationContext = {
         title: body.exploration_context.title,
         summary: body.exploration_context.summary,
         category: body.exploration_context.category || "general",
       };
-
-      // Root real node, fetched as background context only.
       if (body.exploration_context.root_node_id) {
         const { data: root } = await supabase
           .from("nodes")
@@ -155,7 +175,7 @@ export async function POST(req: Request) {
     const visibleGhostSet = new Set(promptInput.visibleGhostTitles);
     const filtered = filterSuggestions(result.suggestions, existingTitles, visibleGhostSet);
 
-    return NextResponse.json({ ok: true, suggestions: filtered });
+    return NextResponse.json({ ok: true, suggestions: filtered, mode });
   } catch (err) {
     console.error("Explore route failed:", err);
     return NextResponse.json({ ok: false, error: "Exploration failed." }, { status: 500 });

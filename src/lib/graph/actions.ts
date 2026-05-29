@@ -37,8 +37,31 @@ function deriveTitle(content: string): string {
   return short.slice(0, 57) + "…";
 }
 
+function nearbyPosition(
+  anchorX?: number,
+  anchorY?: number,
+): { position_x: number; position_y: number } {
+  // If we have an anchor (focused real node), drop the new node within a
+  // small radius around it so the canvas reads as a growing cluster
+  // rather than scattering across the viewport.
+  if (typeof anchorX === "number" && typeof anchorY === "number") {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 160 + Math.random() * 80;
+    return {
+      position_x: anchorX + Math.cos(angle) * radius,
+      position_y: anchorY + Math.sin(angle) * radius,
+    };
+  }
+  // No anchor — drop near the origin so first-time graphs cluster.
+  return {
+    position_x: (Math.random() - 0.5) * 280,
+    position_y: (Math.random() - 0.5) * 200,
+  };
+}
+
 export async function createNodeFromMemoryAction(
   memoryId: string,
+  anchor?: { x: number; y: number },
 ): Promise<{ success: boolean; error?: string }> {
   const user = await requireUser();
   const supabase = await createSupabaseServerClient();
@@ -67,9 +90,7 @@ export async function createNodeFromMemoryAction(
     return { success: false, error: "already_on_canvas" };
   }
 
-  // Scatter new nodes within a 400×300 window centred at the origin.
-  const position_x = (Math.random() - 0.5) * 400;
-  const position_y = (Math.random() - 0.5) * 300;
+  const { position_x, position_y } = nearbyPosition(anchor?.x, anchor?.y);
 
   const { data: node, error: nodeError } = await supabase
     .from("nodes")
@@ -80,6 +101,7 @@ export async function createNodeFromMemoryAction(
       category: "general",
       position_x,
       position_y,
+      origin: "memory",
     })
     .select("id")
     .single();
@@ -138,6 +160,7 @@ export async function createNodeFromMemoryAction(
             source_node_id: node.id,
             target_node_id: r.id,
             relationship_type: "related",
+            origin: "auto_keyword",
           }));
 
         if (toInsert.length > 0) {
@@ -161,6 +184,7 @@ export async function pinGhostSuggestionAction(input: {
   relationship_type?: string;
   position_x?: number;
   position_y?: number;
+  ai_reason?: string;
 }): Promise<{ success: boolean; error?: string; node_id?: string }> {
   const user = await requireUser();
   const supabase = await createSupabaseServerClient();
@@ -193,6 +217,10 @@ export async function pinGhostSuggestionAction(input: {
     ? input.position_y
     : (Math.random() - 0.5) * 300;
 
+  const ai_reason = input.ai_reason
+    ? input.ai_reason.trim().slice(0, 600)
+    : null;
+
   const { data: node, error: nodeError } = await supabase
     .from("nodes")
     .insert({
@@ -202,6 +230,8 @@ export async function pinGhostSuggestionAction(input: {
       category,
       position_x,
       position_y,
+      origin: "ai_pinned",
+      ai_reason,
     })
     .select("id")
     .single();
@@ -217,6 +247,7 @@ export async function pinGhostSuggestionAction(input: {
       source_node_id: input.source_node_id,
       target_node_id: node.id,
       relationship_type: relType || "related",
+      origin: "ai_pinned",
     });
     if (edgeError) {
       console.error("Could not create edge for pinned ghost:", edgeError.message);
@@ -274,6 +305,7 @@ export async function createEdgeAction(
     source_node_id: sourceNodeId,
     target_node_id: targetNodeId,
     relationship_type: trimmedType,
+    origin: "manual",
   });
 
   if (insertError) {
