@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import type { GraphNode, GraphEdge } from "@/types";
+import type { GraphNode, GraphEdge, NodeOrigin, EdgeOrigin } from "@/types";
 import type { MemoryTrailMap } from "@/lib/graph/queries";
 import { createEdgeAction } from "@/lib/graph/actions";
+import { categoryColour } from "@/lib/graph/insights";
 
 const trailFormatter = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -15,6 +16,46 @@ const trailFormatter = new Intl.DateTimeFormat(undefined, {
 
 function formatTimestamp(iso: string): string {
   return trailFormatter.format(new Date(iso));
+}
+
+// Origin badge helpers.
+function OriginBadge({ origin }: { origin: string }) {
+  const isAiPinned = origin === "ai_pinned";
+  const label =
+    origin === "memory"
+      ? "From memory"
+      : origin === "manual"
+      ? "Manual"
+      : origin === "ai_pinned"
+      ? "AI exploration"
+      : origin === "imported"
+      ? "Imported"
+      : origin;
+
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
+        isAiPinned
+          ? "border border-violet-400/40 bg-violet-950/30 text-violet-200"
+          : "border border-neutral-700 bg-neutral-800/50 text-neutral-400",
+      ].join(" ")}
+    >
+      {label}
+    </span>
+  );
+}
+
+// Edge origin badge — omit "manual" since it's the default.
+function EdgeOriginBadge({ origin }: { origin: string }) {
+  if (origin === "manual") return null;
+  const label =
+    origin === "auto_keyword" ? "auto" : origin === "ai_pinned" ? "ai" : origin;
+  return (
+    <span className="ml-1 rounded-full border border-neutral-700 bg-neutral-800/50 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-neutral-500">
+      {label}
+    </span>
+  );
 }
 
 type NodeDetailProps = {
@@ -52,6 +93,7 @@ export function NodeDetail({
   }
 
   const trail = memoryTrails[node.id] ?? [];
+  const colours = categoryColour(node.category || "general");
 
   // Edges where this node is source OR target.
   const connections = edges
@@ -83,13 +125,34 @@ export function NodeDetail({
 
   return (
     <div className="space-y-4">
-      {/* Title + category */}
+      {/* Title + category colour chip + origin badge */}
       <div>
-        <p className="text-base font-semibold leading-snug text-neutral-100">
-          {node.title}
-        </p>
-        {node.category && node.category !== "general" && (
-          <p className="mt-0.5 text-xs text-neutral-600">{node.category}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-base font-semibold leading-snug text-neutral-100">
+            {node.title}
+          </p>
+          {/* Category colour chip */}
+          {node.category && (
+            <span className="flex items-center gap-1 text-xs text-neutral-500">
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: colours.stroke,
+                  flexShrink: 0,
+                }}
+              />
+              {node.category !== "general" ? node.category : "general"}
+            </span>
+          )}
+        </div>
+        {/* Origin badge */}
+        {node.origin && (
+          <div className="mt-1.5">
+            <OriginBadge origin={node.origin as NodeOrigin} />
+          </div>
         )}
       </div>
 
@@ -98,6 +161,18 @@ export function NodeDetail({
         <div className="rounded-lg border border-canvas-border bg-canvas-bg p-3">
           <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-200">
             {node.summary}
+          </p>
+        </div>
+      )}
+
+      {/* "Why this was suggested" — only for AI-pinned nodes with a reason */}
+      {node.origin === "ai_pinned" && node.ai_reason && (
+        <div className="rounded-lg border border-dashed border-violet-400/40 bg-violet-950/15 p-3">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-violet-300/70">
+            Why this was suggested
+          </p>
+          <p className="text-xs leading-relaxed text-violet-100/80">
+            {node.ai_reason}
           </p>
         </div>
       )}
@@ -154,8 +229,9 @@ export function NodeDetail({
                   <span className="line-clamp-1 text-sm text-neutral-200">
                     {other!.title}
                   </span>
-                  <span className="shrink-0 text-xs text-neutral-500">
+                  <span className="flex shrink-0 items-center text-xs text-neutral-500">
                     {isOutgoing ? "→" : "←"} {edge.label ?? edge.relationship_type}
+                    <EdgeOriginBadge origin={edge.origin as EdgeOrigin} />
                   </span>
                 </button>
               </li>
