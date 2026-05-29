@@ -11,10 +11,22 @@ type UploadStage =
   | "done"
   | "error";
 
+type UploadResultDetails = {
+  sectionsCreated: number;
+  chunksCreated: number;
+  nodesCreated: number;
+  edgesCreated: number;
+  warningsCount: number;
+  finalStatus: string;
+};
+
 type UploadState =
   | { status: "idle" }
-  | { status: "working"; stage: Exclude<UploadStage, "idle" | "done" | "error"> }
-  | { status: "success"; message: string; warnings: number }
+  | {
+      status: "working";
+      stage: Exclude<UploadStage, "idle" | "done" | "error">;
+    }
+  | { status: "success"; message: string; details: UploadResultDetails }
   | { status: "error"; message: string };
 
 const ACCEPT =
@@ -32,6 +44,7 @@ type UploadResponse = {
   nodes_created?: number;
   edges_created?: number;
   warnings_count?: number;
+  warnings?: string[];
   status?: string;
   error?: string;
 };
@@ -55,6 +68,9 @@ export function DocumentUploadSheet({
     edgesCreated: number;
     warningsCount: number;
     filename: string;
+    sectionCount: number;
+    chunkCount: number;
+    status: string;
   }) => void;
 }) {
   const [state, setState] = useState<UploadState>({ status: "idle" });
@@ -80,7 +96,9 @@ export function DocumentUploadSheet({
       const next = stages[i + 1];
       timers.push(
         setTimeout(() => {
-          setState((s) => (s.status === "working" ? { status: "working", stage: next } : s));
+          setState((s) =>
+            s.status === "working" ? { status: "working", stage: next } : s,
+          );
         }, totalDelay),
       );
     }
@@ -91,7 +109,10 @@ export function DocumentUploadSheet({
 
   async function handleUpload(file: File) {
     if (file.size > MAX_BYTES) {
-      setState({ status: "error", message: "File is too large. Maximum 10MB." });
+      setState({
+        status: "error",
+        message: "File is too large. Maximum 10MB.",
+      });
       return;
     }
 
@@ -106,18 +127,45 @@ export function DocumentUploadSheet({
         method: "POST",
         body: formData,
       });
-    } catch {
-      setState({ status: "error", message: "Network error. Please try again." });
+    } catch (error) {
+      console.error("[documents/upload] fetch failed", error);
+      setState({
+        status: "error",
+        message: "Network error. Please try again.",
+      });
+      return;
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    console.info("[documents/upload] response.status", response.status);
+    console.info(
+      "[documents/upload] response.headers content-type",
+      contentType,
+    );
+
+    let rawText = "";
+    try {
+      rawText = await response.text();
+      console.info("[documents/upload] raw response text", rawText);
+    } catch (error) {
+      console.error("[documents/upload] failed to read response text", error);
+      setState({
+        status: "error",
+        message: `Could not read server response (HTTP ${response.status}). Please try again.`,
+      });
       return;
     }
 
     let body: UploadResponse;
     try {
-      body = (await response.json()) as UploadResponse;
-    } catch {
+      body = JSON.parse(rawText) as UploadResponse;
+      console.info("[documents/upload] parsed payload", body);
+    } catch (error) {
+      console.error("[documents/upload] response was not valid JSON", error);
+      const preview = rawText.slice(0, 300) || "<empty response>";
       setState({
         status: "error",
-        message: "Server returned an unexpected response.",
+        message: `Server returned a non-JSON response (HTTP ${response.status}). Preview: ${preview}. The upload may have reached the server; please refresh the graph or check Documents before retrying.`,
       });
       return;
     }
@@ -125,25 +173,47 @@ export function DocumentUploadSheet({
     if (!response.ok || !body.ok) {
       setState({
         status: "error",
-        message: body.error ?? "Could not process the document.",
+        message:
+          body.error ??
+          `Could not process the document (HTTP ${response.status}).`,
       });
       return;
     }
 
     const nodesCreated = body.nodes_created ?? 0;
     const edgesCreated = body.edges_created ?? 0;
-    const warningsCount = body.warnings_count ?? 0;
-    const message =
-      nodesCreated > 0
-        ? `Added ${nodesCreated} node${nodesCreated === 1 ? "" : "s"} and ${edgesCreated} connection${edgesCreated === 1 ? "" : "s"} from ${file.name}`
+    const warningsCount = body.warnings_count ?? body.warnings?.length ?? 0;
+    const sectionCount = body.section_count ?? 0;
+    const chunkCount = body.chunk_count ?? 0;
+    const finalStatus = body.status ?? "processed";
+    const processedWithWarnings =
+      finalStatus === "processed_with_warnings" || warningsCount > 0;
+    const message = processedWithWarnings
+      ? `Processed ${file.name} with warnings.`
+      : nodesCreated > 0
+        ? `Processed ${file.name} successfully.`
         : `Saved ${file.name}, but no nodes were created.`;
-    setState({ status: "success", message, warnings: warningsCount });
+    setState({
+      status: "success",
+      message,
+      details: {
+        sectionsCreated: sectionCount,
+        chunksCreated: chunkCount,
+        nodesCreated,
+        edgesCreated,
+        warningsCount,
+        finalStatus,
+      },
+    });
     onSuccess?.({
       documentId: body.document_id ?? "",
       nodesCreated,
       edgesCreated,
       warningsCount,
       filename: file.name,
+      sectionCount,
+      chunkCount,
+      status: finalStatus,
     });
     if (inputRef.current) inputRef.current.value = "";
   }
@@ -160,12 +230,16 @@ export function DocumentUploadSheet({
           "flex flex-col items-center justify-center gap-2 rounded-lg",
           "border border-dashed border-canvas-border bg-canvas-bg px-4 py-6",
           "text-center transition-colors",
-          isWorking
-            ? "opacity-60"
-            : "cursor-pointer hover:border-teal-300/50",
+          isWorking ? "opacity-60" : "cursor-pointer hover:border-teal-300/50",
         ].join(" ")}
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+        >
           <path
             d="M12 16V4M12 4L7 9M12 4l5 5M4 20h16"
             stroke="currentColor"
@@ -197,17 +271,46 @@ export function DocumentUploadSheet({
       {isWorking && (
         <div className="flex items-center gap-2 text-xs text-neutral-400">
           <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-neutral-600 border-t-teal-300" />
-          <span>{STAGE_LABEL[state.stage]} this can take 30 to 60 seconds for large files.</span>
+          <span>
+            {STAGE_LABEL[state.stage]} this can take 30 to 60 seconds for large
+            files.
+          </span>
         </div>
       )}
 
       {state.status === "success" && (
         <div className="rounded-md border border-emerald-500/30 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
-          <p>{state.message}</p>
-          {state.warnings > 0 && (
-            <p className="mt-1 text-amber-300/90">
-              {state.warnings} warning{state.warnings === 1 ? "" : "s"} during
-              processing.
+          <p className="font-medium">{state.message}</p>
+          <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-emerald-100/80">
+            <div>
+              <dt className="text-neutral-400">Sections</dt>
+              <dd>{state.details.sectionsCreated}</dd>
+            </div>
+            <div>
+              <dt className="text-neutral-400">Chunks</dt>
+              <dd>{state.details.chunksCreated}</dd>
+            </div>
+            <div>
+              <dt className="text-neutral-400">Nodes</dt>
+              <dd>{state.details.nodesCreated}</dd>
+            </div>
+            <div>
+              <dt className="text-neutral-400">Edges</dt>
+              <dd>{state.details.edgesCreated}</dd>
+            </div>
+            <div>
+              <dt className="text-neutral-400">Warnings</dt>
+              <dd>{state.details.warningsCount}</dd>
+            </div>
+            <div>
+              <dt className="text-neutral-400">Final status</dt>
+              <dd>{state.details.finalStatus}</dd>
+            </div>
+          </dl>
+          {state.details.warningsCount > 0 && (
+            <p className="mt-2 text-amber-300/90">
+              Processed with {state.details.warningsCount} warning
+              {state.details.warningsCount === 1 ? "" : "s"}.
             </p>
           )}
         </div>

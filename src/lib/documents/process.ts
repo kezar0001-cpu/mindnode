@@ -36,6 +36,10 @@ type ProcessArgs = {
   chunks: SectionChunk[];
 };
 
+function logDocumentGraph(stage: string, details: Record<string, unknown> = {}) {
+  console.info(`[documents/process] ${stage}`, details);
+}
+
 function truncate(text: string, max: number): string {
   if (!text) return "";
   return text.length > max ? text.slice(0, max) : text;
@@ -136,6 +140,12 @@ export async function processDocumentGraph(
 ): Promise<ProcessResult> {
   const supabase = await createSupabaseServerClient();
   const warnings: string[] = [];
+  logDocumentGraph("started", {
+    documentId: args.documentId,
+    userId: args.userId,
+    sections: args.sections.length,
+    chunks: args.chunks.length,
+  });
   const diagnostics: Record<string, unknown> = {};
 
   // ---- Existing graph context -------------------------------------------
@@ -148,6 +158,10 @@ export async function processDocumentGraph(
     throw new Error(`Failed to load existing nodes: ${existingErr.message}`);
   }
   const existingNodes = existingNodesRaw ?? [];
+  logDocumentGraph("loaded existing graph context", {
+    documentId: args.documentId,
+    existingNodes: existingNodes.length,
+  });
   const existingForSimilarity: ExistingNodeForSimilarity[] = existingNodes.map(
     (n) => ({
       id: n.id,
@@ -180,6 +194,10 @@ export async function processDocumentGraph(
     end_offset: s.end_offset,
   }));
   if (sectionRows.length > 0) {
+    logDocumentGraph("inserting document_sections", {
+      documentId: args.documentId,
+      sections: sectionRows.length,
+    });
     const { error } = await supabase.from("document_sections").insert(sectionRows);
     if (error) {
       throw new Error(`Failed to insert sections: ${error.message}`);
@@ -200,6 +218,10 @@ export async function processDocumentGraph(
   }));
   let chunkIdByIndex = new Map<number, string>();
   if (chunkRows.length > 0) {
+    logDocumentGraph("inserting document_chunks", {
+      documentId: args.documentId,
+      chunks: chunkRows.length,
+    });
     const { data, error } = await supabase
       .from("document_chunks")
       .insert(chunkRows)
@@ -218,6 +240,7 @@ export async function processDocumentGraph(
   });
 
   // Insert document_root node.
+  logDocumentGraph("inserting document root node", { documentId: args.documentId });
   const { data: rootNode, error: rootErr } = await supabase
     .from("nodes")
     .insert({
@@ -236,6 +259,10 @@ export async function processDocumentGraph(
     throw new Error(`Failed to insert document root node: ${rootErr?.message}`);
   }
   const rootNodeId = rootNode.id;
+  logDocumentGraph("document root node inserted", {
+    documentId: args.documentId,
+    rootNodeId,
+  });
 
   await supabase
     .from("source_documents")
@@ -321,6 +348,11 @@ export async function processDocumentGraph(
   }
 
   for (const section of args.sections) {
+    logDocumentGraph("processing section graph", {
+      documentId: args.documentId,
+      sectionIndex: section.index,
+      sectionTitle: section.title,
+    });
     const sectionNodeId = sectionNodeIdById.get(section.id);
     const chunkList = chunksBySection.get(section.id) ?? [];
     if (chunkList.length === 0 || !sectionNodeId) continue;
@@ -505,6 +537,16 @@ export async function processDocumentGraph(
       `Low yield: only ${totalChildNodes} child nodes for ${args.sections.length} sections (${totalChars} chars).`,
     );
   }
+
+  logDocumentGraph("completed", {
+    documentId: args.documentId,
+    nodesCreated,
+    edgesCreated,
+    notesCreated,
+    warnings: warnings.length,
+    aiCalls,
+    aiFailures,
+  });
 
   diagnostics.ai_calls = aiCalls;
   diagnostics.ai_failures = aiFailures;
