@@ -977,16 +977,30 @@ export function MindWorkspace({
         title="Upload document"
       >
         <DocumentUploadSheet
-          onSuccess={({ nodesCreated, edgesCreated, warningsCount, filename }) => {
+          onSuccess={({
+            nodesCreated,
+            edgesCreated,
+            warningsCount,
+            filename,
+            sectionCount,
+            chunkCount,
+            status,
+          }) => {
             const base =
-              nodesCreated > 0
-                ? `Added ${nodesCreated} node${nodesCreated === 1 ? "" : "s"} and ${edgesCreated} connection${edgesCreated === 1 ? "" : "s"} from ${filename}`
-                : `Saved ${filename}.`;
-            const withWarnings =
+              status === "processed_with_warnings" || warningsCount > 0
+                ? `Processed ${filename} with warnings`
+                : `Processed ${filename}`;
+            const details = [
+              `${sectionCount} section${sectionCount === 1 ? "" : "s"}`,
+              `${chunkCount} chunk${chunkCount === 1 ? "" : "s"}`,
+              `${nodesCreated} node${nodesCreated === 1 ? "" : "s"}`,
+              `${edgesCreated} edge${edgesCreated === 1 ? "" : "s"}`,
+            ].join(", ");
+            const warningSuffix =
               warningsCount > 0
-                ? `${base} (${warningsCount} warning${warningsCount === 1 ? "" : "s"})`
-                : base;
-            setUploadToast(withWarnings);
+                ? `, ${warningsCount} warning${warningsCount === 1 ? "" : "s"}`
+                : "";
+            setUploadToast(`${base}: ${details}${warningSuffix}.`);
             setActiveSheet("documents");
             router.refresh();
             setTimeout(() => setUploadToast(null), 5000);
