@@ -12,6 +12,10 @@ import { ChatPanel } from "@/components/chat/chat-panel";
 import { signOutAction } from "@/app/login/actions";
 import { pinGhostSuggestionAction } from "@/lib/graph/actions";
 import { deriveInsights, summarizeInsights, type Insight } from "@/lib/graph/insights";
+import {
+  computeVisibleNodeIds,
+  type GraphViewMode,
+} from "@/lib/graph/view-model";
 import type { GraphNode, GraphEdge } from "@/types";
 import type {
   MemoryTrailMap,
@@ -29,6 +33,7 @@ type MindWorkspaceProps = {
   promotedMemoryIds: string[];
   sourceDocuments: SourceDocument[];
   nodeDocumentSources: Record<string, NodeDocumentSource>;
+  documentNodeMembership: Record<string, string>;
   userEmail: string;
 };
 
@@ -171,6 +176,7 @@ export function MindWorkspace({
   promotedMemoryIds,
   sourceDocuments,
   nodeDocumentSources,
+  documentNodeMembership,
   userEmail,
 }: MindWorkspaceProps) {
   const router = useRouter();
@@ -191,6 +197,25 @@ export function MindWorkspace({
   const [activeRootNodeId, setActiveRootNodeId] = useState<string | null>(null);
   const [activeGhostPathIds, setActiveGhostPathIds] = useState<string[]>([]);
   const [selectedGhostId, setSelectedGhostId] = useState<string | null>(null);
+
+  // Graph view model — focus vs global, plus per-document expand state.
+  // Default to focus mode once the graph is large enough to be unreadable.
+  const [viewMode, setViewMode] = useState<GraphViewMode>(
+    initialNodes.length > 20 ? "focus" : "global",
+  );
+  const [expandBranch, setExpandBranch] = useState(false);
+  const [expandedDocumentIds, setExpandedDocumentIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  const toggleDocumentExpanded = useCallback((documentId: string) => {
+    setExpandedDocumentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(documentId)) next.delete(documentId);
+      else next.add(documentId);
+      return next;
+    });
+  }, []);
 
   // Chat companion state.
   const [chatOpen, setChatOpen] = useState(false);
@@ -227,6 +252,38 @@ export function MindWorkspace({
       .slice(0, 20);
   }, [initialNodes, searchQuery]);
 
+  // Derive which nodes/edges the canvas should actually render. Documents are
+  // collapsed to their root by default; focus mode narrows to the selected
+  // node's neighbourhood. The full graph stays the source of truth.
+  const { visibleNodes, visibleEdges } = useMemo(() => {
+    const visibleIds = computeVisibleNodeIds({
+      nodes: initialNodes.map((n) => ({ id: n.id, origin: n.origin })),
+      edges: initialEdges.map((e) => ({
+        source_node_id: e.source_node_id,
+        target_node_id: e.target_node_id,
+      })),
+      mode: viewMode,
+      selectedNodeId,
+      expandBranch,
+      expandedDocumentIds,
+      documentMembership: documentNodeMembership,
+    });
+    const nodes = initialNodes.filter((n) => visibleIds.has(n.id));
+    const edges = initialEdges.filter(
+      (e) =>
+        visibleIds.has(e.source_node_id) && visibleIds.has(e.target_node_id),
+    );
+    return { visibleNodes: nodes, visibleEdges: edges };
+  }, [
+    initialNodes,
+    initialEdges,
+    viewMode,
+    selectedNodeId,
+    expandBranch,
+    expandedDocumentIds,
+    documentNodeMembership,
+  ]);
+
   // When user selects a different real node, drop ghosts whose anchor
   // no longer matches. Pane-click (null) leaves ghosts alone.
   useEffect(() => {
@@ -257,6 +314,7 @@ export function MindWorkspace({
     setSelectedGhostId(null);
     setActiveGhostPathIds([]);
     setActiveRootNodeId(id);
+    setExpandBranch(false);
     if (id) {
       setActiveSheet("detail");
     } else {
@@ -305,13 +363,14 @@ export function MindWorkspace({
     [],
   );
 
-  const handleSuggestAvenues = useCallback(async () => {
+  const handleSuggestAvenues = useCallback(async (overrideNodeId?: string) => {
+    const targetNodeId = overrideNodeId ?? selectedNodeId;
     setAiLoading(true);
     setAiError(null);
     try {
       const visible = ghosts.map((g) => g.title);
       const suggestions = await callExplore({
-        selected_node_id: selectedNodeId ?? undefined,
+        selected_node_id: targetNodeId ?? undefined,
         visible_ghost_titles: visible,
       });
 
@@ -324,8 +383,8 @@ export function MindWorkspace({
 
       let anchorX = 0;
       let anchorY = 0;
-      if (selectedNodeId) {
-        const sel = initialNodes.find((n) => n.id === selectedNodeId);
+      if (targetNodeId) {
+        const sel = initialNodes.find((n) => n.id === targetNodeId);
         if (sel) {
           anchorX = sel.position_x;
           anchorY = sel.position_y;
@@ -340,9 +399,9 @@ export function MindWorkspace({
           ...suggestion,
           id,
           ghost_id: id,
-          anchor_type: selectedNodeId ? "real_node" : "graph",
-          anchor_node_id: selectedNodeId ?? undefined,
-          root_node_id: selectedNodeId ?? undefined,
+          anchor_type: targetNodeId ? "real_node" : "graph",
+          anchor_node_id: targetNodeId ?? undefined,
+          root_node_id: targetNodeId ?? undefined,
           depth: 0,
           path_ids: [id],
           x: positions[i].x,
@@ -350,7 +409,7 @@ export function MindWorkspace({
         };
       });
       setGhosts(newGhosts);
-      setActiveRootNodeId(selectedNodeId);
+      setActiveRootNodeId(targetNodeId);
       setActiveGhostPathIds([]);
       setSelectedGhostId(null);
     } catch (err) {
@@ -618,6 +677,39 @@ export function MindWorkspace({
     [ghosts, callExplore, handleNodeSelect],
   );
 
+  // --- Node exploration controls (from the node detail sheet) ---
+  const handleShowNeighbours = useCallback(
+    (id: string) => {
+      handleNodeSelect(id);
+      setViewMode("focus");
+    },
+    [handleNodeSelect],
+  );
+
+  const handleExpandBranch = useCallback((id: string) => {
+    setSelectedNodeId(id);
+    setSelectedGhostId(null);
+    setActiveGhostPathIds([]);
+    setActiveRootNodeId(id);
+    setViewMode("focus");
+    setExpandBranch(true);
+    setActiveSheet("detail");
+  }, []);
+
+  const handleHideUnrelated = useCallback(() => {
+    setViewMode("focus");
+  }, []);
+
+  const handleExploreWithAI = useCallback(
+    (id: string) => {
+      setSelectedNodeId(id);
+      setViewMode("focus");
+      setActiveSheet(null);
+      void handleSuggestAvenues(id);
+    },
+    [handleSuggestAvenues],
+  );
+
   const sheetOpen = activeSheet !== null;
   const suggestLabel = aiLoading
     ? "Thinking…"
@@ -652,8 +744,8 @@ export function MindWorkspace({
     <div className="fixed inset-0 overflow-hidden">
       <div className="absolute inset-0 z-0">
         <Canvas
-          dbNodes={initialNodes}
-          dbEdges={initialEdges}
+          dbNodes={visibleNodes}
+          dbEdges={visibleEdges}
           selectedNodeId={selectedNodeId}
           onNodeSelect={handleNodeSelect}
           ghostSuggestions={visibleGhosts}
@@ -700,7 +792,7 @@ export function MindWorkspace({
           {/* AI / Suggest — sparkle icon */}
           <button
             type="button"
-            onClick={handleSuggestAvenues}
+            onClick={() => handleSuggestAvenues()}
             disabled={aiLoading}
             aria-label={suggestLabel}
             title={suggestLabel}
@@ -817,6 +909,43 @@ export function MindWorkspace({
         className="fixed left-4 z-20 flex items-center gap-0.5 rounded-full border border-canvas-border bg-canvas-surface/90 px-1.5 py-1.5 shadow-md backdrop-blur-sm"
         style={{ bottom: "max(24px, calc(env(safe-area-inset-bottom) + 8px))" }}
       >
+        {/* Focus / Global view toggle */}
+        <button
+          type="button"
+          onClick={() =>
+            setViewMode((m) => (m === "focus" ? "global" : "focus"))
+          }
+          aria-label={
+            viewMode === "focus"
+              ? "Switch to global view"
+              : "Switch to focus view"
+          }
+          title={
+            viewMode === "focus"
+              ? "Focus view — showing the selected neighbourhood"
+              : "Global view — showing the whole graph"
+          }
+          className={[
+            "flex h-7 items-center gap-1 rounded-full px-2.5 text-[11px] font-medium transition-colors",
+            viewMode === "focus"
+              ? "bg-teal-950/40 text-teal-200"
+              : "text-neutral-400 hover:text-neutral-100",
+          ].join(" ")}
+        >
+          {viewMode === "focus" ? (
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <circle cx="6" cy="6" r="2.2" fill="currentColor" />
+              <circle cx="6" cy="6" r="5" stroke="currentColor" strokeWidth="1.2" />
+            </svg>
+          ) : (
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <circle cx="6" cy="6" r="5" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M1 6h10M6 1v10" stroke="currentColor" strokeWidth="1.2" />
+            </svg>
+          )}
+          {viewMode === "focus" ? "Focus" : "Global"}
+        </button>
+        <div className="h-4 w-px bg-canvas-border" />
         <button
           type="button"
           onClick={() => setHideGhosts((h) => !h)}
@@ -926,6 +1055,13 @@ export function MindWorkspace({
           }}
           onNodeDeleted={closeSheet}
           onAskAboutNode={(node, prompt) => openChat(node, prompt)}
+          onShowNeighbours={handleShowNeighbours}
+          onExpandBranch={handleExpandBranch}
+          onHideUnrelated={handleHideUnrelated}
+          onExploreWithAI={handleExploreWithAI}
+          documentMembership={documentNodeMembership}
+          expandedDocumentIds={expandedDocumentIds}
+          onToggleDocument={toggleDocumentExpanded}
         />
       </BottomSheet>
 

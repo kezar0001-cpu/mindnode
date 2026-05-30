@@ -26,6 +26,7 @@ import type { GraphNode, GraphEdge } from "@/types";
 
 type MindNodeData = Record<string, unknown> & {
   label: string;
+  origin: string;
   focused?: boolean;
   connected?: boolean;
   dimmed?: boolean;
@@ -62,10 +63,35 @@ export type GhostSuggestion = {
   y: number;
 };
 
+// Small origin badge shown above the node label. Keeps the provenance of a
+// node legible at a glance (document root vs section vs AI concept vs memory).
+function originBadge(
+  origin: string,
+): { label: string; className: string } | null {
+  switch (origin) {
+    case "document_root":
+      return { label: "Document", className: "text-blue-300/80" };
+    case "document_section":
+      return { label: "Section", className: "text-blue-300/60" };
+    case "document_ai":
+      return { label: "Concept", className: "text-blue-300/60" };
+    case "ai_pinned":
+      return { label: "AI", className: "text-violet-300/70" };
+    case "chat_suggested":
+      return { label: "Chat", className: "text-teal-300/70" };
+    case "memory":
+      return { label: "Memory", className: "text-neutral-400/70" };
+    default:
+      return null;
+  }
+}
+
 function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
   const focused = data.focused || selected;
   const connected = data.connected;
   const dimmed = data.dimmed;
+  const isDocRoot = data.origin === "document_root";
+  const badge = originBadge(data.origin);
 
   // Focused/selected state dominates — overrides to white-ish border + scale.
   // Connected state uses category accent ring.
@@ -91,9 +117,14 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
       />
       <div
         className={[
-          "w-40 rounded-2xl border px-3 py-2.5 text-center transition-all duration-200",
+          // Document roots are visually larger so a collapsed document reads
+          // as a clear source anchor rather than just another concept.
+          isDocRoot ? "w-52 px-4 py-3.5" : "w-40 px-3 py-2.5",
+          "rounded-2xl border text-center transition-all duration-200",
           focused
             ? "border-teal-300 bg-neutral-800 shadow-xl shadow-teal-500/25 scale-[1.1]"
+            : isDocRoot
+            ? "border-blue-400/50 shadow-md"
             : connected
             ? "shadow-md"
             : "shadow-sm",
@@ -101,9 +132,20 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
         ].join(" ")}
         style={focused ? undefined : { ...borderStyle, ...bgStyle, boxShadow }}
       >
+        {badge && (
+          <p
+            className={[
+              "mb-0.5 text-[9px] font-semibold uppercase tracking-wider",
+              badge.className,
+            ].join(" ")}
+          >
+            {badge.label}
+          </p>
+        )}
         <p
           className={[
-            "line-clamp-2 text-xs font-medium leading-snug",
+            "line-clamp-2 font-medium leading-snug",
+            isDocRoot ? "text-sm" : "text-xs",
             focused ? "text-white" : "text-neutral-100",
           ].join(" ")}
         >
@@ -209,6 +251,7 @@ function toFlowNodes(dbNodes: GraphNode[]): Node<MindNodeData>[] {
       position: { x: n.position_x, y: n.position_y },
       data: {
         label: n.title,
+        origin: n.origin,
         categoryStroke: colours.stroke,
         categoryGlow: colours.glow,
         categoryBg: colours.bg,
@@ -271,6 +314,9 @@ export function Canvas({
   }, [dbNodes]);
 
   const styledEdges = useMemo<Edge[]>(() => {
+    // When the canvas is dense, only the selected node's neighbourhood gets
+    // labels — otherwise overlapping relationship text drowns the graph.
+    const showAllLabels = dbEdges.length <= 40;
     return dbEdges.map((e) => {
       const touchesSelected =
         selectedNodeId !== null &&
@@ -281,17 +327,28 @@ export function Canvas({
       // Category tint from source node at low opacity when not focused.
       const sourceCat = nodeColourMap.get(e.source_node_id);
       const categoryStroke = sourceCat ? sourceCat.stroke : "#3a3f4b";
+      const showLabel = touchesSelected || showAllLabels;
+      // Fade unselected edges so the selected neighbourhood stands out, and
+      // keep background edges faint when nothing is selected on a busy canvas.
+      const baseOpacity =
+        selectedNodeId !== null
+          ? dimmed
+            ? 0.18
+            : 1
+          : showAllLabels
+          ? 1
+          : 0.55;
       return {
         id: e.id,
         source: e.source_node_id,
         target: e.target_node_id,
-        label: e.label ?? e.relationship_type,
+        label: showLabel ? e.label ?? e.relationship_type : undefined,
         type: "default",
         animated: touchesSelected,
         style: {
           stroke: touchesSelected ? "#5eead4" : `${categoryStroke}55`,
           strokeWidth: touchesSelected ? Math.max(width, 2) : width,
-          opacity: dimmed ? 0.25 : 1,
+          opacity: baseOpacity,
         },
         labelStyle: {
           fill: touchesSelected ? "#5eead4" : "#6b7280",
@@ -372,38 +429,28 @@ export function Canvas({
     setEdges(allEdges);
   }, [allEdges, setEdges]);
 
-  // Merge new real nodes; preserve existing positions and selection.
+  // Reconcile the canvas nodes against the (already view-filtered) dbNodes:
+  // add newcomers, drop nodes that are no longer visible, and preserve the
+  // live position of nodes the user has dragged this session. Focus/connected/
+  // dimmed flags and ghost nodes are applied in the same pass so visibility,
+  // selection styling, and ghosts never race each other.
   useEffect(() => {
     setNodes((prev) => {
-      const prevRealIds = new Set(
-        prev.filter((n) => n.type !== "ghostNode").map((n) => n.id),
+      const prevPos = new Map(
+        prev
+          .filter((n) => n.type !== "ghostNode")
+          .map((n) => [n.id, n.position]),
       );
-      const incoming = toFlowNodes(dbNodes).filter((n) => !prevRealIds.has(n.id));
-      return incoming.length === 0 ? prev : [...prev, ...incoming];
-    });
-  }, [dbNodes, setNodes]);
-
-  // Sync ghost nodes — replace any existing ghosts wholesale.
-  useEffect(() => {
-    setNodes((prev) => {
-      const realNodes = prev.filter((n) => n.type !== "ghostNode");
+      const realNodes = toFlowNodes(dbNodes).map((n) => {
+        const position = prevPos.get(n.id) ?? n.position;
+        const focused = n.id === selectedNodeId;
+        const connected = connectedIds.has(n.id);
+        const dimmed = selectedNodeId !== null && !focused && !connected;
+        return { ...n, position, data: { ...n.data, focused, connected, dimmed } };
+      });
       return [...realNodes, ...ghostFlowNodes];
     });
-  }, [ghostFlowNodes, setNodes]);
-
-  // Focus / connected / dimmed flags on real nodes only.
-  useEffect(() => {
-    setNodes((prev) =>
-      prev.map((n): Node<MindNodeData> | Node<GhostNodeData> => {
-        if (n.type === "ghostNode") return n;
-        const real = n as Node<MindNodeData>;
-        const focused = real.id === selectedNodeId;
-        const connected = connectedIds.has(real.id);
-        const dimmed = selectedNodeId !== null && !focused && !connected;
-        return { ...real, data: { ...real.data, focused, connected, dimmed } };
-      }),
-    );
-  }, [selectedNodeId, connectedIds, setNodes]);
+  }, [dbNodes, ghostFlowNodes, selectedNodeId, connectedIds, setNodes]);
 
   const onNodeDragStop: OnNodeDrag = useCallback((_event, node) => {
     if (node.type === "ghostNode") return;

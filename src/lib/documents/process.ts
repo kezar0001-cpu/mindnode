@@ -48,17 +48,25 @@ function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max) : text;
 }
 
-function computeCentroid(
+function computeClusterCenter(
   nodes: { position_x: number; position_y: number }[],
 ): { x: number; y: number } {
+  // Place a new document cluster clear of the existing graph: to the right of
+  // its bounding box, vertically centred. Prevents the cluster from being
+  // dropped on top of the user's existing nodes.
   if (nodes.length === 0) return { x: 0, y: 0 };
-  let sx = 0;
-  let sy = 0;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
   for (const n of nodes) {
-    sx += n.position_x;
-    sy += n.position_y;
+    if (n.position_x < minX) minX = n.position_x;
+    if (n.position_x > maxX) maxX = n.position_x;
+    if (n.position_y < minY) minY = n.position_y;
+    if (n.position_y > maxY) maxY = n.position_y;
   }
-  return { x: sx / nodes.length, y: sy / nodes.length };
+  const CLUSTER_GAP = 1100;
+  return { x: maxX + CLUSTER_GAP, y: (minY + maxY) / 2 };
 }
 
 // Normalize a title for duplicate detection: lowercase, alphanum only, sorted words.
@@ -193,8 +201,8 @@ export async function processDocumentGraph(
     existingTitleToId.set(n.title.toLowerCase().trim(), n.id);
   }
 
-  const centroid = computeCentroid(
-    existingNodes.slice(0, 8).map((n) => ({
+  const centroid = computeClusterCenter(
+    existingNodes.map((n) => ({
       position_x: n.position_x,
       position_y: n.position_y,
     })),

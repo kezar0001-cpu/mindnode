@@ -441,6 +441,17 @@ export async function deleteDocumentGraphAction(
   for (const note of docNotes ?? []) {
     if (note.node_id) nodeIds.add(note.node_id as string);
   }
+
+  // Section nodes live on document_sections.node_id, not document_notes —
+  // collect them too or the section nodes are orphaned on the canvas.
+  const { data: docSections } = await supabase
+    .from("document_sections")
+    .select("node_id")
+    .eq("document_id", documentId);
+  for (const section of docSections ?? []) {
+    if (section.node_id) nodeIds.add(section.node_id as string);
+  }
+
   if (doc.document_root_node_id) nodeIds.add(doc.document_root_node_id as string);
 
   const nodeIdList = Array.from(nodeIds);
@@ -468,8 +479,11 @@ export async function deleteDocumentGraphAction(
       .in("node_id", nodeIdList);
   }
 
-  // Remove document note entries.
+  // Remove document note + section + chunk rows before the nodes, so no FK
+  // (node_id) dangles and the source records are fully cleaned up.
   await supabase.from("document_notes").delete().eq("document_id", documentId);
+  await supabase.from("document_sections").delete().eq("document_id", documentId);
+  await supabase.from("document_chunks").delete().eq("document_id", documentId);
 
   let nodesDeleted = 0;
   if (nodeIdList.length > 0) {

@@ -20,7 +20,10 @@ function fileLabel(mime: string, filename: string): string {
   return "TXT";
 }
 
-function statusStyle(status: string): { label: string; className: string } {
+function statusStyle(
+  status: string,
+  opts?: { recovered?: boolean },
+): { label: string; className: string } {
   switch (status) {
     case "processed":
       return {
@@ -29,7 +32,7 @@ function statusStyle(status: string): { label: string; className: string } {
       };
     case "processed_with_warnings":
       return {
-        label: "Warnings",
+        label: opts?.recovered ? "Recovered" : "Warnings",
         className: "border-amber-500/40 bg-amber-950/30 text-amber-200",
       };
     case "failed":
@@ -62,7 +65,10 @@ export function DocumentStatusCard({
 }) {
   const router = useRouter();
   const type = fileLabel(document.mime_type, document.original_filename);
-  const status = statusStyle(document.status);
+  const recovered =
+    document.status === "processed_with_warnings" &&
+    (document.error_message?.includes("Recovered from stale") ?? false);
+  const status = statusStyle(document.status, { recovered });
   const hasCounts =
     document.section_count > 0 ||
     document.chunk_count > 0 ||
