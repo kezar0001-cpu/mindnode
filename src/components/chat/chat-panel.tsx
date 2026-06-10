@@ -24,6 +24,10 @@ type UiMessage = {
   content: string;
   citations: ChatCitation[];
   suggestion?: Suggestion;
+  // Set on a user turn that got no assistant response. `persisted` tells the
+  // retry whether the server already stored the turn (regenerate) or not
+  // (re-send the text).
+  failed?: { persisted: boolean; mode: ChatMode };
 };
 
 type ChatPanelProps = {
@@ -138,67 +142,122 @@ export function ChatPanel({
     });
   }, [messages, open]);
 
-  const send = useCallback(async (modeOverride?: ChatMode, overrideText?: string) => {
-    const text = (overrideText ?? input).trim();
-    if (!text || sending) return;
+  // Core request runner — used by both fresh sends and retries of a failed
+  // turn. `retryPersisted` regenerates the assistant response for a user
+  // turn the server already stored, so retrying never duplicates it.
+  const deliver = useCallback(
+    async (opts: {
+      msgId: string;
+      mode: ChatMode;
+      text?: string;
+      retryPersisted?: boolean;
+    }) => {
+      setSending(true);
+      setError(null);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === opts.msgId ? { ...m, failed: undefined } : m)),
+      );
 
-    const userMsg: UiMessage = {
-      id: localId(),
-      role: "user",
-      content: text,
-      citations: [],
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    setInput("");
-    setSending(true);
-    setError(null);
-
-    const mode: ChatMode =
-      modeOverride ?? (focusNode ? "node_focus" : "global");
-
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          selected_node_id: focusNode?.id,
-          conversation_id: conversationId,
-          mode,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.ok) {
-        setError(json.error ?? "Chat failed.");
-        return;
-      }
-      setConversationId(json.conversation_id ?? conversationId);
-
-      const changes = json.proposed_graph_changes as
-        | (ProposedGraphChanges & { suggestion_id?: string | null })
-        | undefined;
-      const suggestion: Suggestion | undefined = changes
-        ? {
-            suggestionId: changes.suggestion_id ?? null,
-            changes: { nodes: changes.nodes ?? [], edges: changes.edges ?? [] },
-            status: "pending",
-          }
-        : undefined;
-
-      const assistantMsg: UiMessage = {
-        id: localId(),
-        role: "assistant",
-        content: json.answer ?? "",
-        citations: (json.citations ?? []) as ChatCitation[],
-        suggestion,
+      const markFailed = (persisted: boolean) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === opts.msgId
+              ? { ...m, failed: { persisted, mode: opts.mode } }
+              : m,
+          ),
+        );
       };
-      setMessages((prev) => [...prev, assistantMsg]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Network error.");
-    } finally {
-      setSending(false);
-    }
-  }, [input, sending, focusNode, conversationId]);
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            opts.retryPersisted
+              ? {
+                  retry: true,
+                  selected_node_id: focusNode?.id,
+                  conversation_id: conversationId,
+                  mode: opts.mode,
+                }
+              : {
+                  message: opts.text,
+                  selected_node_id: focusNode?.id,
+                  conversation_id: conversationId,
+                  mode: opts.mode,
+                },
+          ),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.ok) {
+          if (json.conversation_id) setConversationId(json.conversation_id);
+          markFailed(
+            json.user_message_persisted === true || opts.retryPersisted === true,
+          );
+          setError(json.error ?? "Chat failed.");
+          return;
+        }
+        setConversationId(json.conversation_id ?? conversationId);
+
+        const changes = json.proposed_graph_changes as
+          | (ProposedGraphChanges & { suggestion_id?: string | null })
+          | undefined;
+        const suggestion: Suggestion | undefined = changes
+          ? {
+              suggestionId: changes.suggestion_id ?? null,
+              changes: { nodes: changes.nodes ?? [], edges: changes.edges ?? [] },
+              status: "pending",
+            }
+          : undefined;
+
+        const assistantMsg: UiMessage = {
+          id: localId(),
+          role: "assistant",
+          content: json.answer ?? "",
+          citations: (json.citations ?? []) as ChatCitation[],
+          suggestion,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      } catch (err) {
+        markFailed(opts.retryPersisted === true);
+        setError(err instanceof Error ? err.message : "Network error.");
+      } finally {
+        setSending(false);
+      }
+    },
+    [focusNode, conversationId],
+  );
+
+  const send = useCallback(
+    async (modeOverride?: ChatMode, overrideText?: string) => {
+      const text = (overrideText ?? input).trim();
+      if (!text || sending) return;
+
+      const mode: ChatMode = modeOverride ?? (focusNode ? "node_focus" : "global");
+      const msgId = localId();
+      setMessages((prev) => [
+        ...prev,
+        { id: msgId, role: "user", content: text, citations: [] },
+      ]);
+      setInput("");
+      await deliver({ msgId, mode, text });
+    },
+    [input, sending, focusNode, deliver],
+  );
+
+  const retryMessage = useCallback(
+    (messageId: string) => {
+      const msg = messages.find((m) => m.id === messageId);
+      if (!msg?.failed || sending) return;
+      void deliver({
+        msgId: messageId,
+        mode: msg.failed.mode,
+        text: msg.content,
+        retryPersisted: msg.failed.persisted,
+      });
+    },
+    [messages, sending, deliver],
+  );
 
   const updateSuggestionStatus = useCallback(
     (messageId: string, status: Suggestion["status"]) => {
@@ -279,6 +338,23 @@ export function ChatPanel({
           {messages.map((m) => (
             <div key={m.id}>
               <MessageBubble message={m} onFocusNode={onFocusNode} />
+              {m.role === "user" && m.failed && (
+                <div className="mt-1 flex items-center justify-end gap-2 text-[11px]">
+                  <span className="text-red-300">
+                    {m.failed.persisted
+                      ? "No response — your message is saved."
+                      : "Message didn’t send."}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => retryMessage(m.id)}
+                    disabled={sending}
+                    className="rounded-full border border-red-400/40 px-2.5 py-0.5 font-medium text-red-200 hover:bg-red-950/40 disabled:opacity-40"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
               {m.role === "assistant" && m.suggestion && (
                 <SuggestionCard
                   suggestion={m.suggestion}
