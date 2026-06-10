@@ -4,6 +4,8 @@ import "server-only";
 // client. Dimension is pinned to 1536 to match the vector(1536) columns; the
 // text-embedding-3-* family supports an explicit `dimensions` parameter.
 
+import { fetchWithRetry } from "./http";
+
 const OPENAI_EMBEDDINGS_URL = "https://api.openai.com/v1/embeddings";
 
 export const EMBEDDING_DIMENSIONS = 1536;
@@ -28,26 +30,22 @@ async function embedBatch(inputs: string[]): Promise<EmbedResult> {
     return { ok: false, error: "AI provider not configured." };
   }
 
-  let response: Response;
-  try {
-    response = await fetch(OPENAI_EMBEDDINGS_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: embeddingModel(),
-        input: inputs,
-        dimensions: EMBEDDING_DIMENSIONS,
-      }),
-    });
-  } catch (err) {
-    return {
-      ok: false,
-      error: `Network error: ${err instanceof Error ? err.message : "unknown"}`,
-    };
+  const result = await fetchWithRetry(OPENAI_EMBEDDINGS_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: embeddingModel(),
+      input: inputs,
+      dimensions: EMBEDDING_DIMENSIONS,
+    }),
+  });
+  if (!result.ok) {
+    return { ok: false, error: result.error };
   }
+  const response = result.response;
 
   if (!response.ok) {
     return { ok: false, error: `Embedding provider error (${response.status}).` };
