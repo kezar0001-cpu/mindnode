@@ -184,11 +184,29 @@ visible.
   canvas renders a status dot, the state label, and strikes through done
   steps.
 
-## Phase F — Polish for daily use
+## Phase F — Polish for daily use (in progress)
 
-- Streaming chat responses.
-- Background processing for large documents (status polling instead of one
-  long request).
-- OCR for image-only PDFs.
-- Canvas mini-map and keyboard navigation on desktop.
-- Auto-layout pass for hand-made tangles.
+Shipped:
+
+- Canvas mini-map (`MiniMap`), colour-coded by node kind (selected, ghost,
+  document root, plan, category). Hidden below the `sm` breakpoint so the
+  mobile canvas stays uncluttered.
+- Keyboard navigation (`KeyboardNavController`): arrow keys move the
+  selection to the nearest node in that direction (connected neighbours
+  preferred), Escape clears it. Suppressed while typing in any field.
+- Auto-layout / declutter pass (`src/lib/graph/declutter.ts` +
+  `declutterGraphAction`): a deterministic relaxation spreads overlapping
+  nodes to a minimum spacing and persists only the nodes that moved.
+  Triggered by the "Tidy" control in the graph tray.
+
+Deferred (need infrastructure beyond this codebase):
+
+- Streaming chat responses — requires switching `/api/chat` to a streamed
+  response and an incremental client renderer; the structured
+  answer+citations+plan JSON contract would need a streaming-friendly
+  redesign first.
+- Background processing for large documents — needs a job queue / worker
+  (e.g. Supabase queue or a cron worker) instead of the current synchronous
+  upload route.
+- OCR for image-only PDFs — needs an OCR dependency or external service
+  (e.g. Tesseract / a vision model) added to the extraction pipeline.
