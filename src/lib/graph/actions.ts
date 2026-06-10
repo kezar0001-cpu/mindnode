@@ -7,6 +7,12 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { syncNodeEmbeddings } from "@/lib/ai/embedding-sync";
 import { declutterPositions } from "./declutter";
 import { findRelatedNodesByKeywords } from "./keyword-link";
+import type { GraphNode, GraphEdge } from "@/types";
+
+// Explicit node columns — the embedding vector must never ride along in
+// action results. Matches listNodes in queries.ts.
+const NODE_COLUMNS =
+  "id, user_id, title, summary, category, position_x, position_y, origin, ai_reason, plan_status, created_at, updated_at";
 
 export async function updateNodePositionAction(
   id: string,
@@ -35,6 +41,7 @@ export async function updateNodePositionAction(
 export async function declutterGraphAction(): Promise<{
   success: boolean;
   moved: number;
+  moves?: { id: string; position_x: number; position_y: number }[];
   error?: string;
 }> {
   const user = await requireUser();
@@ -51,7 +58,7 @@ export async function declutterGraphAction(): Promise<{
 
   const moves = declutterPositions(nodes);
   if (moves.length === 0) {
-    return { success: true, moved: 0 };
+    return { success: true, moved: 0, moves: [] };
   }
 
   await Promise.all(
@@ -65,7 +72,7 @@ export async function declutterGraphAction(): Promise<{
   );
 
   revalidatePath("/");
-  return { success: true, moved: moves.length };
+  return { success: true, moved: moves.length, moves };
 }
 
 // Derive a short node title from raw thought content.
@@ -104,7 +111,12 @@ function nearbyPosition(
 export async function createNodeFromMemoryAction(
   memoryId: string,
   anchor?: { x: number; y: number },
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{
+  success: boolean;
+  error?: string;
+  node?: GraphNode;
+  edges?: GraphEdge[];
+}> {
   const user = await requireUser();
   const supabase = await createSupabaseServerClient();
 
@@ -145,7 +157,7 @@ export async function createNodeFromMemoryAction(
       position_y,
       origin: "memory",
     })
-    .select("id")
+    .select(NODE_COLUMNS)
     .single();
 
   if (nodeError || !node) {
@@ -168,6 +180,7 @@ export async function createNodeFromMemoryAction(
   }
 
   // Auto-link: find existing nodes that share keyword overlap with the raw memory.
+  let createdEdges: GraphEdge[] = [];
   try {
     const { data: candidates } = await supabase
       .from("nodes")
@@ -206,7 +219,11 @@ export async function createNodeFromMemoryAction(
           }));
 
         if (toInsert.length > 0) {
-          await supabase.from("edges").insert(toInsert);
+          const { data: inserted } = await supabase
+            .from("edges")
+            .insert(toInsert)
+            .select("*");
+          createdEdges = (inserted as GraphEdge[]) ?? [];
         }
       }
     }
@@ -220,7 +237,7 @@ export async function createNodeFromMemoryAction(
   );
 
   revalidatePath("/");
-  return { success: true };
+  return { success: true, node: node as GraphNode, edges: createdEdges };
 }
 
 export async function pinGhostSuggestionAction(input: {
@@ -232,7 +249,13 @@ export async function pinGhostSuggestionAction(input: {
   position_x?: number;
   position_y?: number;
   ai_reason?: string;
-}): Promise<{ success: boolean; error?: string; node_id?: string }> {
+}): Promise<{
+  success: boolean;
+  error?: string;
+  node_id?: string;
+  node?: GraphNode;
+  edge?: GraphEdge;
+}> {
   const user = await requireUser();
   const supabase = await createSupabaseServerClient();
 
@@ -280,25 +303,32 @@ export async function pinGhostSuggestionAction(input: {
       origin: "ai_pinned",
       ai_reason,
     })
-    .select("id")
+    .select(NODE_COLUMNS)
     .single();
 
   if (nodeError || !node) {
     return { success: false, error: "Could not create node." };
   }
 
+  let createdEdge: GraphEdge | undefined;
   if (input.source_node_id && input.source_node_id !== node.id) {
     const relType = (input.relationship_type || "related").trim().slice(0, 40);
-    const { error: edgeError } = await supabase.from("edges").insert({
-      user_id: user.id,
-      source_node_id: input.source_node_id,
-      target_node_id: node.id,
-      relationship_type: relType || "related",
-      origin: "ai_pinned",
-    });
+    const { data: edge, error: edgeError } = await supabase
+      .from("edges")
+      .insert({
+        user_id: user.id,
+        source_node_id: input.source_node_id,
+        target_node_id: node.id,
+        relationship_type: relType || "related",
+        origin: "ai_pinned",
+      })
+      .select("*")
+      .single();
     if (edgeError) {
       console.error("Could not create edge for pinned ghost:", edgeError.message);
       // Node was created successfully — keep it, surface a soft warning.
+    } else if (edge) {
+      createdEdge = edge as GraphEdge;
     }
   }
 
@@ -308,7 +338,12 @@ export async function pinGhostSuggestionAction(input: {
   );
 
   revalidatePath("/");
-  return { success: true, node_id: node.id };
+  return {
+    success: true,
+    node_id: node.id,
+    node: node as GraphNode,
+    edge: createdEdge,
+  };
 }
 
 export async function deleteNodeAction(
@@ -362,7 +397,12 @@ export async function deleteNodeAction(
 // recomputed server-side so the client can never delete more than it owns.
 export async function deleteBranchAction(
   rootNodeId: string,
-): Promise<{ success: boolean; error?: string; nodesDeleted?: number }> {
+): Promise<{
+  success: boolean;
+  error?: string;
+  nodesDeleted?: number;
+  deletedNodeIds?: string[];
+}> {
   const user = await requireUser();
   const supabase = await createSupabaseServerClient();
 
@@ -446,7 +486,12 @@ export async function deleteBranchAction(
   }
 
   revalidatePath("/");
-  return { success: true, nodesDeleted: deleted?.length ?? 0 };
+  const deletedIds = (deleted ?? []).map((d) => d.id);
+  return {
+    success: true,
+    nodesDeleted: deletedIds.length,
+    deletedNodeIds: deletedIds,
+  };
 }
 
 // Cycles or sets a plan step's progress state. Only nodes that are already
@@ -455,7 +500,7 @@ export async function deleteBranchAction(
 export async function setPlanStatusAction(
   nodeId: string,
   status: "todo" | "doing" | "done",
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; node?: GraphNode }> {
   const user = await requireUser();
   const supabase = await createSupabaseServerClient();
 
@@ -473,18 +518,20 @@ export async function setPlanStatusAction(
     return { success: false, error: "This node is not a plan step." };
   }
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("nodes")
     .update({ plan_status: status })
     .eq("id", nodeId)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .select(NODE_COLUMNS)
+    .single();
 
   if (error) {
     return { success: false, error: "Could not update progress." };
   }
 
   revalidatePath("/");
-  return { success: true };
+  return { success: true, node: updated as GraphNode };
 }
 
 export async function deleteEdgeAction(
@@ -521,7 +568,7 @@ export async function deleteEdgeAction(
 export async function updateNodeAction(
   nodeId: string,
   fields: { title: string; summary: string; category: string },
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; node?: GraphNode }> {
   const user = await requireUser();
 
   const title = fields.title.trim().slice(0, 120);
@@ -545,11 +592,13 @@ export async function updateNodeAction(
     return { success: false, error: "Node not found." };
   }
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("nodes")
     .update({ title, summary, category })
     .eq("id", nodeId)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .select(NODE_COLUMNS)
+    .single();
 
   if (error) {
     return { success: false, error: "Could not update node. Please try again." };
@@ -561,13 +610,13 @@ export async function updateNodeAction(
   );
 
   revalidatePath("/");
-  return { success: true };
+  return { success: true, node: updated as GraphNode };
 }
 
 export async function updateEdgeAction(
   edgeId: string,
   relationshipType: string,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; edge?: GraphEdge }> {
   const user = await requireUser();
 
   const relType = relationshipType.trim().slice(0, 40);
@@ -588,18 +637,20 @@ export async function updateEdgeAction(
     return { success: false, error: "Connection not found." };
   }
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("edges")
     .update({ relationship_type: relType })
     .eq("id", edgeId)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .select("*")
+    .single();
 
   if (error) {
     return { success: false, error: "Could not update connection." };
   }
 
   revalidatePath("/");
-  return { success: true };
+  return { success: true, edge: updated as GraphEdge };
 }
 
 export async function deleteDocumentGraphAction(
@@ -699,7 +750,7 @@ export async function createEdgeAction(
   sourceNodeId: string,
   targetNodeId: string,
   relationshipType: string,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; edge?: GraphEdge }> {
   const user = await requireUser();
 
   if (sourceNodeId === targetNodeId) {
@@ -736,18 +787,22 @@ export async function createEdgeAction(
     return { success: false, error: "These thoughts are already connected." };
   }
 
-  const { error: insertError } = await supabase.from("edges").insert({
-    user_id: user.id,
-    source_node_id: sourceNodeId,
-    target_node_id: targetNodeId,
-    relationship_type: trimmedType,
-    origin: "manual",
-  });
+  const { data: inserted, error: insertError } = await supabase
+    .from("edges")
+    .insert({
+      user_id: user.id,
+      source_node_id: sourceNodeId,
+      target_node_id: targetNodeId,
+      relationship_type: trimmedType,
+      origin: "manual",
+    })
+    .select("*")
+    .single();
 
   if (insertError) {
     return { success: false, error: "Could not create connection. Please try again." };
   }
 
   revalidatePath("/");
-  return { success: true };
+  return { success: true, edge: inserted as GraphEdge };
 }

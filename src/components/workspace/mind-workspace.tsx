@@ -25,6 +25,7 @@ import {
 } from "@/lib/graph/suggestion-actions";
 import type { CaptureSuggestionResponse } from "@/lib/ai/suggest-schema";
 import { deriveInsights, summarizeInsights, type Insight } from "@/lib/graph/insights";
+import type { GraphDelta } from "@/lib/graph/delta";
 import {
   computeVisibleNodeIds,
   descendantsOf,
@@ -195,6 +196,46 @@ export function MindWorkspace({
   userEmail,
 }: MindWorkspaceProps) {
   const router = useRouter();
+
+  // Local graph state, seeded from the server and reconciled whenever
+  // revalidated props arrive. Mutations merge their returned rows here
+  // immediately, so the canvas updates without waiting on a route refresh.
+  const [graphNodes, setGraphNodes] = useState<GraphNode[]>(initialNodes);
+  const [graphEdges, setGraphEdges] = useState<GraphEdge[]>(initialEdges);
+  useEffect(() => setGraphNodes(initialNodes), [initialNodes]);
+  useEffect(() => setGraphEdges(initialEdges), [initialEdges]);
+
+  const applyGraphDelta = useCallback((delta: GraphDelta) => {
+    if (delta.upsertNodes?.length || delta.removeNodeIds?.length) {
+      setGraphNodes((prev) => {
+        const removed = new Set(delta.removeNodeIds ?? []);
+        const byId = new Map(
+          prev.filter((n) => !removed.has(n.id)).map((n) => [n.id, n]),
+        );
+        for (const n of delta.upsertNodes ?? []) byId.set(n.id, n);
+        return Array.from(byId.values());
+      });
+    }
+    if (delta.upsertEdges?.length || delta.removeEdgeIds?.length || delta.removeNodeIds?.length) {
+      setGraphEdges((prev) => {
+        const removedEdges = new Set(delta.removeEdgeIds ?? []);
+        const removedNodes = new Set(delta.removeNodeIds ?? []);
+        const byId = new Map(
+          prev
+            .filter(
+              (e) =>
+                !removedEdges.has(e.id) &&
+                !removedNodes.has(e.source_node_id) &&
+                !removedNodes.has(e.target_node_id),
+            )
+            .map((e) => [e.id, e]),
+        );
+        for (const e of delta.upsertEdges ?? []) byId.set(e.id, e);
+        return Array.from(byId.values());
+      });
+    }
+  }, []);
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
   const [uploadToast, setUploadToast] = useState<string | null>(null);
@@ -307,6 +348,10 @@ export function MindWorkspace({
       });
       return;
     }
+    applyGraphDelta({
+      upsertNodes: result.node ? [result.node] : [],
+      upsertEdges: result.edges ?? [],
+    });
     setCaptureReview(null);
     setActiveSheet(null);
     setUploadToast(
@@ -314,9 +359,8 @@ export function MindWorkspace({
         ? "Updated the existing thought."
         : "Added to your canvas.",
     );
-    router.refresh();
     setTimeout(() => setUploadToast(null), 4000);
-  }, [captureReview, router]);
+  }, [captureReview, applyGraphDelta]);
 
   const handleSuggestionDismiss = useCallback(() => {
     if (captureReview && (captureReview.phase === "ready" || captureReview.phase === "applying")) {
@@ -340,23 +384,28 @@ export function MindWorkspace({
         });
         return;
       }
+      if (result.success) {
+        applyGraphDelta({
+          upsertNodes: result.node ? [result.node] : [],
+          upsertEdges: result.edges ?? [],
+        });
+      }
       if (captureReview.phase === "ready" || captureReview.phase === "applying") {
         void dismissCaptureSuggestionAction(captureReview.data.suggestion_id);
       }
       setCaptureReview(null);
       setActiveSheet(null);
       setUploadToast("Added to your canvas.");
-      router.refresh();
       setTimeout(() => setUploadToast(null), 4000);
     } finally {
       setAddAsIsPending(false);
     }
-  }, [captureReview, router]);
+  }, [captureReview, applyGraphDelta]);
 
   // Insights derived from the in-memory graph.
   const insights = useMemo(
-    () => deriveInsights(initialNodes, initialEdges),
-    [initialNodes, initialEdges],
+    () => deriveInsights(graphNodes, graphEdges),
+    [graphNodes, graphEdges],
   );
   const insightSummary = useMemo(() => summarizeInsights(insights), [insights]);
   const insightCount = insights.length;
@@ -364,25 +413,25 @@ export function MindWorkspace({
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return [];
-    return initialNodes
+    return graphNodes
       .filter(
         (n) =>
           n.title.toLowerCase().includes(q) ||
           n.summary.toLowerCase().includes(q),
       )
       .slice(0, 20);
-  }, [initialNodes, searchQuery]);
+  }, [graphNodes, searchQuery]);
 
   // Derive which nodes/edges the canvas should actually render. Documents are
   // collapsed to their root by default; focus mode narrows to the selected
   // node's neighbourhood. The full graph stays the source of truth.
   const { visibleNodes, visibleEdges, collapsedCounts } = useMemo(() => {
-    const vmEdges = initialEdges.map((e) => ({
+    const vmEdges = graphEdges.map((e) => ({
       source_node_id: e.source_node_id,
       target_node_id: e.target_node_id,
     }));
     const visibleIds = computeVisibleNodeIds({
-      nodes: initialNodes.map((n) => ({ id: n.id, origin: n.origin })),
+      nodes: graphNodes.map((n) => ({ id: n.id, origin: n.origin })),
       edges: vmEdges,
       mode: viewMode,
       selectedNodeId,
@@ -391,8 +440,8 @@ export function MindWorkspace({
       documentMembership: documentNodeMembership,
       collapsedNodeIds,
     });
-    const nodes = initialNodes.filter((n) => visibleIds.has(n.id));
-    const edges = initialEdges.filter(
+    const nodes = graphNodes.filter((n) => visibleIds.has(n.id));
+    const edges = graphEdges.filter(
       (e) =>
         visibleIds.has(e.source_node_id) && visibleIds.has(e.target_node_id),
     );
@@ -408,8 +457,8 @@ export function MindWorkspace({
     }
     return { visibleNodes: nodes, visibleEdges: edges, collapsedCounts: counts };
   }, [
-    initialNodes,
-    initialEdges,
+    graphNodes,
+    graphEdges,
     viewMode,
     selectedNodeId,
     expandBranch,
@@ -519,7 +568,7 @@ export function MindWorkspace({
       let anchorX = 0;
       let anchorY = 0;
       if (targetNodeId) {
-        const sel = initialNodes.find((n) => n.id === targetNodeId);
+        const sel = graphNodes.find((n) => n.id === targetNodeId);
         if (sel) {
           anchorX = sel.position_x;
           anchorY = sel.position_y;
@@ -552,7 +601,7 @@ export function MindWorkspace({
     } finally {
       setAiLoading(false);
     }
-  }, [selectedNodeId, initialNodes, ghosts, callExplore]);
+  }, [selectedNodeId, graphNodes, ghosts, callExplore]);
 
   const handleGhostExplore = useCallback(
     async (ghostId: string) => {
@@ -660,6 +709,11 @@ export function MindWorkspace({
         if (result.node_id) {
           setPinnedGhostMap((prev) => ({ ...prev, [ghost.id]: result.node_id! }));
         }
+        // Show the new node (and its edge) on the canvas immediately.
+        applyGraphDelta({
+          upsertNodes: result.node ? [result.node] : [],
+          upsertEdges: result.edge ? [result.edge] : [],
+        });
         const next = getGhostPathState(ghosts, ghostId);
         setActiveRootNodeId(next.activeRootNodeId);
         setActiveGhostPathIds(next.activeGhostPathIds);
@@ -671,7 +725,7 @@ export function MindWorkspace({
         setPinningGhostIds((prev) => prev.filter((id) => id !== ghostId));
       }
     },
-    [ghosts, pinnedGhostMap],
+    [ghosts, pinnedGhostMap, applyGraphDelta],
   );
 
   const handleClearGhosts = useCallback(() => {
@@ -694,19 +748,30 @@ export function MindWorkspace({
         setAiError(result.error ?? "Could not tidy the graph.");
         return;
       }
+      // Apply the new positions locally — no route refresh needed.
+      if (result.moves && result.moves.length > 0) {
+        const moveById = new Map(result.moves.map((m) => [m.id, m]));
+        setGraphNodes((prev) =>
+          prev.map((n) => {
+            const move = moveById.get(n.id);
+            return move
+              ? { ...n, position_x: move.position_x, position_y: move.position_y }
+              : n;
+          }),
+        );
+      }
       setUploadToast(
         result.moved === 0
           ? "Graph is already tidy."
           : `Tidied ${result.moved} node${result.moved === 1 ? "" : "s"}.`,
       );
-      router.refresh();
       setTimeout(() => setUploadToast(null), 4000);
     } catch (err) {
       setAiError(err instanceof Error ? err.message : "Could not tidy the graph.");
     } finally {
       setDecluttering(false);
     }
-  }, [decluttering, router]);
+  }, [decluttering]);
 
   const handleGhostDismiss = useCallback((ghostId: string) => {
     setGhosts((prev) => {
@@ -1262,8 +1327,9 @@ export function MindWorkspace({
       >
         <NodeDetail
           selectedNodeId={selectedNodeId}
-          nodes={initialNodes}
-          edges={initialEdges}
+          nodes={graphNodes}
+          edges={graphEdges}
+          onGraphDelta={applyGraphDelta}
           memoryTrails={memoryTrails}
           nodeDocumentSources={nodeDocumentSources}
           onSelectNode={(id) => {
@@ -1417,7 +1483,6 @@ export function MindWorkspace({
         focusNode={chatFocusNode}
         onClearFocus={() => setChatFocusNode(null)}
         starter={chatStarter}
-        onApplied={() => router.refresh()}
         onFocusNode={(id) => {
           setChatOpen(false);
           handleNodeSelect(id);

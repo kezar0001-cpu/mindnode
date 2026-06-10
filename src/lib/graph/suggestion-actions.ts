@@ -6,12 +6,19 @@ import { requireUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { syncNodeEmbeddings } from "@/lib/ai/embedding-sync";
 import { CaptureSuggestionSchema } from "@/lib/ai/suggest-schema";
+import type { GraphNode, GraphEdge } from "@/types";
+
+// Explicit node columns — keeps the embedding vector out of action results.
+const NODE_COLUMNS =
+  "id, user_id, title, summary, category, position_x, position_y, origin, ai_reason, plan_status, created_at, updated_at";
 
 export type ApplySuggestionResult = {
   success: boolean;
   error?: string;
   node_id?: string;
   action?: "create_node" | "update_node";
+  node?: GraphNode;
+  edges?: GraphEdge[];
 };
 
 function placementNear(
@@ -81,6 +88,7 @@ export async function applyCaptureSuggestionAction(
   }
 
   let nodeId: string;
+  let resultNode: GraphNode | undefined;
 
   if (suggestion.action === "update_node" && suggestion.target_node_id) {
     const { data: target } = await supabase
@@ -92,7 +100,7 @@ export async function applyCaptureSuggestionAction(
     if (!target) {
       return { success: false, error: "The node to update no longer exists." };
     }
-    const { error: updateError } = await supabase
+    const { data: updated, error: updateError } = await supabase
       .from("nodes")
       .update({
         title: suggestion.title,
@@ -100,11 +108,14 @@ export async function applyCaptureSuggestionAction(
         category: suggestion.category,
       })
       .eq("id", target.id)
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .select(NODE_COLUMNS)
+      .single();
     if (updateError) {
       return { success: false, error: "Could not update the node." };
     }
     nodeId = target.id;
+    resultNode = updated as GraphNode;
   } else {
     // Place the new node near its strongest suggested connection so the
     // canvas reads as a growing cluster.
@@ -133,12 +144,13 @@ export async function applyCaptureSuggestionAction(
         origin: "memory",
         ai_reason: suggestion.explanation,
       })
-      .select("id")
+      .select(NODE_COLUMNS)
       .single();
     if (createError || !created) {
       return { success: false, error: "Could not create the node." };
     }
     nodeId = created.id;
+    resultNode = created as GraphNode;
   }
 
   const { error: linkError } = await supabase.from("node_memory_links").insert({
@@ -157,6 +169,7 @@ export async function applyCaptureSuggestionAction(
   }
 
   // Suggested edges — ownership-checked, duplicates skipped, best-effort.
+  const createdEdges: GraphEdge[] = [];
   for (const edge of suggestion.suggested_edges) {
     if (edge.target_node_id === nodeId) continue;
     const { data: owned } = await supabase
@@ -174,13 +187,18 @@ export async function applyCaptureSuggestionAction(
       .eq("target_node_id", edge.target_node_id)
       .maybeSingle();
     if (existing) continue;
-    await supabase.from("edges").insert({
-      user_id: user.id,
-      source_node_id: nodeId,
-      target_node_id: edge.target_node_id,
-      relationship_type: edge.relationship_type.trim().slice(0, 40) || "related",
-      origin: "ai_suggested",
-    });
+    const { data: insertedEdge } = await supabase
+      .from("edges")
+      .insert({
+        user_id: user.id,
+        source_node_id: nodeId,
+        target_node_id: edge.target_node_id,
+        relationship_type: edge.relationship_type.trim().slice(0, 40) || "related",
+        origin: "ai_suggested",
+      })
+      .select("*")
+      .single();
+    if (insertedEdge) createdEdges.push(insertedEdge as GraphEdge);
   }
 
   await supabase
@@ -194,7 +212,13 @@ export async function applyCaptureSuggestionAction(
   );
 
   revalidatePath("/");
-  return { success: true, node_id: nodeId, action: suggestion.action };
+  return {
+    success: true,
+    node_id: nodeId,
+    action: suggestion.action,
+    node: resultNode,
+    edges: createdEdges,
+  };
 }
 
 export async function dismissCaptureSuggestionAction(

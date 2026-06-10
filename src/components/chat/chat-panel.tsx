@@ -36,7 +36,9 @@ type ChatPanelProps = {
   focusNode: { id: string; title: string } | null;
   onClearFocus: () => void;
   starter: { prompt: string; nonce: number } | null;
-  onApplied: () => void;
+  // Optional hook for after a suggestion is applied. The apply action
+  // revalidates the route itself, so no explicit refresh is needed here.
+  onApplied?: () => void;
   // Tapping a resolved citation closes the chat and focuses that node.
   onFocusNode?: (nodeId: string) => void;
 };
@@ -360,7 +362,7 @@ export function ChatPanel({
                   suggestion={m.suggestion}
                   onApplied={() => {
                     updateSuggestionStatus(m.id, "applied");
-                    onApplied();
+                    onApplied?.();
                   }}
                   onDismissed={() => updateSuggestionStatus(m.id, "dismissed")}
                 />
