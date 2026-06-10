@@ -61,6 +61,8 @@ export interface Database {
           // — enforced by DB CHECK constraint.
           origin: string;
           ai_reason: string | null;
+          // "todo" | "doing" | "done" | null — enforced by DB CHECK.
+          plan_status: string | null;
           // pgvector(1536), text representation. Excluded from list selects.
           embedding: string | null;
           created_at: string;
@@ -76,6 +78,7 @@ export interface Database {
           position_y?: number;
           origin?: string;
           ai_reason?: string | null;
+          plan_status?: string | null;
           embedding?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -90,6 +93,7 @@ export interface Database {
           position_y?: number;
           origin?: string;
           ai_reason?: string | null;
+          plan_status?: string | null;
           embedding?: string | null;
           created_at?: string;
           updated_at?: string;

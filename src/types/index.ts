@@ -27,7 +27,12 @@ export type NodeOrigin =
   | "document_ai"
   | "document_root"
   | "document_section"
-  | "chat_suggested";
+  | "chat_suggested"
+  | "plan";
+
+// Progress state for plan-step nodes. Null on ordinary nodes.
+export type PlanStatus = "todo" | "doing" | "done";
+
 export type EdgeOrigin =
   | "manual"
   | "auto_keyword"
@@ -56,6 +61,7 @@ export interface GraphNode {
   position_y: number;
   origin: NodeOrigin | string;
   ai_reason: string | null;
+  plan_status: PlanStatus | null;
   created_at: ISODateString;
   updated_at: ISODateString;
 }
@@ -124,7 +130,12 @@ export interface AISuggestion {
 
 export type ChatRole = "user" | "assistant";
 
-export type ChatMode = "global" | "node_focus" | "document_focus" | "graph_review";
+export type ChatMode =
+  | "global"
+  | "node_focus"
+  | "document_focus"
+  | "graph_review"
+  | "plan";
 
 // A single source/graph reference the AI used to ground an answer.
 // node_id / document_id are resolved server-side after generation so the
@@ -157,6 +168,9 @@ export interface ProposedEdge {
 export interface ProposedGraphChanges {
   nodes: ProposedNode[];
   edges: ProposedEdge[];
+  // When true, the changes describe a staged plan: applied nodes get
+  // origin "plan" and an initial plan_status of "todo".
+  is_plan?: boolean;
 }
 
 export interface ChatMessageRecord {

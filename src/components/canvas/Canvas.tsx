@@ -27,6 +27,7 @@ import type { GraphNode, GraphEdge } from "@/types";
 type MindNodeData = Record<string, unknown> & {
   label: string;
   origin: string;
+  planStatus?: string | null;
   focused?: boolean;
   connected?: boolean;
   dimmed?: boolean;
@@ -83,6 +84,24 @@ function originBadge(
       return { label: "Chat", className: "text-teal-300/70" };
     case "memory":
       return { label: "Memory", className: "text-neutral-400/70" };
+    case "plan":
+      return { label: "Plan", className: "text-amber-300/80" };
+    default:
+      return null;
+  }
+}
+
+// Colour + label for a plan step's progress state.
+function planStatusStyle(
+  status: string,
+): { label: string; dot: string; text: string } | null {
+  switch (status) {
+    case "todo":
+      return { label: "To do", dot: "#94a3b8", text: "text-neutral-400" };
+    case "doing":
+      return { label: "Doing", dot: "#fbbf24", text: "text-amber-300" };
+    case "done":
+      return { label: "Done", dot: "#4ade80", text: "text-emerald-400" };
     default:
       return null;
   }
@@ -94,6 +113,8 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
   const dimmed = data.dimmed;
   const isDocRoot = data.origin === "document_root";
   const badge = originBadge(data.origin);
+  const planStatus = data.planStatus ? planStatusStyle(data.planStatus) : null;
+  const isDone = data.planStatus === "done";
 
   // Focused/selected state dominates — overrides to white-ish border + scale.
   // Connected state uses category accent ring.
@@ -134,21 +155,43 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
         ].join(" ")}
         style={focused ? undefined : { ...borderStyle, ...bgStyle, boxShadow }}
       >
-        {badge && (
+        {planStatus ? (
           <p
             className={[
-              "mb-0.5 text-[9px] font-semibold uppercase tracking-wider",
-              badge.className,
+              "mb-0.5 flex items-center justify-center gap-1 text-[9px] font-semibold uppercase tracking-wider",
+              planStatus.text,
             ].join(" ")}
           >
-            {badge.label}
+            <span
+              style={{
+                display: "inline-block",
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: planStatus.dot,
+                flexShrink: 0,
+              }}
+            />
+            {planStatus.label}
           </p>
+        ) : (
+          badge && (
+            <p
+              className={[
+                "mb-0.5 text-[9px] font-semibold uppercase tracking-wider",
+                badge.className,
+              ].join(" ")}
+            >
+              {badge.label}
+            </p>
+          )
         )}
         <p
           className={[
             "line-clamp-2 font-medium leading-snug",
             isDocRoot ? "text-sm" : "text-xs",
             focused ? "text-white" : "text-neutral-100",
+            isDone ? "line-through opacity-70" : "",
           ].join(" ")}
         >
           {data.label}
@@ -262,6 +305,7 @@ function toFlowNodes(
       data: {
         label: n.title,
         origin: n.origin,
+        planStatus: n.plan_status,
         collapsedCount: collapsedCounts?.[n.id],
         categoryStroke: colours.stroke,
         categoryGlow: colours.glow,

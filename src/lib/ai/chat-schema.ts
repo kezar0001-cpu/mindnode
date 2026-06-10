@@ -26,8 +26,10 @@ export const ProposedEdgeSchema = z.object({
 });
 
 export const ProposedGraphChangesSchema = z.object({
-  nodes: z.array(ProposedNodeSchema).max(8).default([]),
-  edges: z.array(ProposedEdgeSchema).max(12).default([]),
+  nodes: z.array(ProposedNodeSchema).max(20).default([]),
+  edges: z.array(ProposedEdgeSchema).max(30).default([]),
+  // Set by the model in plan mode: applied nodes become tracked plan steps.
+  is_plan: z.boolean().optional(),
 });
 
 export const ChatResponseSchema = z.object({
