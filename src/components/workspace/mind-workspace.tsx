@@ -10,6 +10,7 @@ import {
   SuggestionReview,
   type CaptureReviewState,
 } from "@/components/input/suggestion-review";
+import { SearchSheet } from "@/components/search/search-sheet";
 import { DocumentList } from "@/components/documents/document-list";
 import { DocumentUploadSheet } from "@/components/documents/document-upload-sheet";
 import { ChatPanel } from "@/components/chat/chat-panel";
@@ -248,7 +249,6 @@ export function MindWorkspace({
   const pinningGhostIdRef = useRef<Set<string>>(new Set());
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
   const [hideGhosts, setHideGhosts] = useState(false);
   const [activeRootNodeId, setActiveRootNodeId] = useState<string | null>(null);
   const [activeGhostPathIds, setActiveGhostPathIds] = useState<string[]>([]);
@@ -409,18 +409,6 @@ export function MindWorkspace({
   );
   const insightSummary = useMemo(() => summarizeInsights(insights), [insights]);
   const insightCount = insights.length;
-
-  const searchResults = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return [];
-    return graphNodes
-      .filter(
-        (n) =>
-          n.title.toLowerCase().includes(q) ||
-          n.summary.toLowerCase().includes(q),
-      )
-      .slice(0, 20);
-  }, [graphNodes, searchQuery]);
 
   // Derive which nodes/edges the canvas should actually render. Documents are
   // collapsed to their root by default; focus mode narrows to the selected
@@ -1351,49 +1339,14 @@ export function MindWorkspace({
 
       <BottomSheet
         open={activeSheet === "search"}
-        onClose={() => {
-          setSearchQuery("");
-          closeSheet();
-        }}
-        title="Search thoughts"
+        onClose={closeSheet}
+        title="Search"
       >
-        <input
-          type="search"
-          autoFocus
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search titles and thoughts…"
-          className="block w-full rounded border border-canvas-border bg-canvas-bg px-3 py-2 text-sm text-neutral-100 outline-none focus:border-teal-300"
+        <SearchSheet
+          open={activeSheet === "search"}
+          onSelectNode={handleNodeSelect}
+          onSuggestPlacement={requestSuggestion}
         />
-        {searchResults.length > 0 ? (
-          <ul className="mt-3 space-y-2">
-            {searchResults.map((node) => (
-              <li key={node.id}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchQuery("");
-                    handleNodeSelect(node.id);
-                  }}
-                  className="block w-full rounded border border-canvas-border bg-canvas-bg p-3 text-left hover:border-teal-300/40"
-                >
-                  <p className="line-clamp-1 text-sm font-medium text-neutral-100">
-                    {node.title}
-                  </p>
-                  <p className="mt-1 line-clamp-2 text-xs text-neutral-500">
-                    {node.summary}
-                  </p>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-3 text-xs text-neutral-500">
-            {searchQuery.trim()
-              ? "No matches."
-              : "Type to search your thoughts."}
-          </p>
-        )}
       </BottomSheet>
 
       <BottomSheet
