@@ -1,7 +1,31 @@
 # MindNode — Full Product Review & Improvement Roadmap
 
-_Diagnosis and actionable direction. No code is changed by this document. It ends
-with copy-paste prompts you can hand to a coding agent, one per change._
+_Diagnosis and actionable direction. It ends with copy-paste prompts you can
+hand to a coding agent, one per change._
+
+## Implementation status (2026-06-10)
+
+Executed on this branch:
+
+- **6.1 + 6.2** — AI capture suggestion (`/api/suggest`, create-vs-update via
+  embeddings, review sheet, apply/dismiss actions, `ai_suggestions` revived).
+- **6.3** — Capture confirmation flow + un-promoted thought badge; recent
+  thoughts list gained "Add with AI".
+- **6.4** — Hybrid global search (`/api/search`) over nodes, raw thoughts, and
+  document chunks with grouped results.
+- **6.5** — Chat user turn persisted before generation; failed turns show
+  Retry (regenerates without duplicating the persisted turn).
+- **6.6** — Local graph state with delta merges from action results; redundant
+  `router.refresh()` calls removed; canvas now honours server-side moves
+  (fixes Tidy never visually moving nodes).
+- **6.7** — Timeouts + bounded retry/backoff on all AI/embedding calls.
+- **6.10 (partial)** — Auto-dismissing toasts, Escape-to-close + dialog
+  semantics on sheets/chat, header tooltips, ghost button disabled fix.
+  Remaining: focus trap, accessible names on canvas nodes.
+
+Still open: **6.8** (transactions — needs a migration applied to the live
+project), **6.9** (real upload progress), **6.11** (desktop docked panels),
+**6.12** (test suite + CI), and the P2 items.
 
 Date: 2026-06-10
 Scope reviewed: backend (API routes, AI pipeline, data layer, Supabase schema/RLS),
