@@ -14,6 +14,7 @@ import { pinGhostSuggestionAction } from "@/lib/graph/actions";
 import { deriveInsights, summarizeInsights, type Insight } from "@/lib/graph/insights";
 import {
   computeVisibleNodeIds,
+  descendantsOf,
   type GraphViewMode,
 } from "@/lib/graph/view-model";
 import type { GraphNode, GraphEdge } from "@/types";
@@ -217,6 +218,21 @@ export function MindWorkspace({
     });
   }, []);
 
+  // Per-node branch contraction: a contracted node hides its downstream
+  // branch on the canvas until expanded again.
+  const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  const toggleBranchCollapsed = useCallback((nodeId: string) => {
+    setCollapsedNodeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  }, []);
+
   // Chat companion state.
   const [chatOpen, setChatOpen] = useState(false);
   const [chatFocusNode, setChatFocusNode] = useState<{ id: string; title: string } | null>(null);
@@ -255,25 +271,37 @@ export function MindWorkspace({
   // Derive which nodes/edges the canvas should actually render. Documents are
   // collapsed to their root by default; focus mode narrows to the selected
   // node's neighbourhood. The full graph stays the source of truth.
-  const { visibleNodes, visibleEdges } = useMemo(() => {
+  const { visibleNodes, visibleEdges, collapsedCounts } = useMemo(() => {
+    const vmEdges = initialEdges.map((e) => ({
+      source_node_id: e.source_node_id,
+      target_node_id: e.target_node_id,
+    }));
     const visibleIds = computeVisibleNodeIds({
       nodes: initialNodes.map((n) => ({ id: n.id, origin: n.origin })),
-      edges: initialEdges.map((e) => ({
-        source_node_id: e.source_node_id,
-        target_node_id: e.target_node_id,
-      })),
+      edges: vmEdges,
       mode: viewMode,
       selectedNodeId,
       expandBranch,
       expandedDocumentIds,
       documentMembership: documentNodeMembership,
+      collapsedNodeIds,
     });
     const nodes = initialNodes.filter((n) => visibleIds.has(n.id));
     const edges = initialEdges.filter(
       (e) =>
         visibleIds.has(e.source_node_id) && visibleIds.has(e.target_node_id),
     );
-    return { visibleNodes: nodes, visibleEdges: edges };
+    // "+N hidden" badge counts for visible contracted anchors.
+    const counts: Record<string, number> = {};
+    for (const cid of collapsedNodeIds) {
+      if (!visibleIds.has(cid)) continue;
+      let hidden = 0;
+      for (const d of descendantsOf(vmEdges, cid)) {
+        if (!visibleIds.has(d)) hidden += 1;
+      }
+      if (hidden > 0) counts[cid] = hidden;
+    }
+    return { visibleNodes: nodes, visibleEdges: edges, collapsedCounts: counts };
   }, [
     initialNodes,
     initialEdges,
@@ -282,6 +310,7 @@ export function MindWorkspace({
     expandBranch,
     expandedDocumentIds,
     documentNodeMembership,
+    collapsedNodeIds,
   ]);
 
   // When user selects a different real node, drop ghosts whose anchor
@@ -748,6 +777,7 @@ export function MindWorkspace({
           dbEdges={visibleEdges}
           selectedNodeId={selectedNodeId}
           onNodeSelect={handleNodeSelect}
+          collapsedCounts={collapsedCounts}
           ghostSuggestions={visibleGhosts}
           activeRootNodeId={activeRootNodeId}
           activeGhostPathIds={activeGhostPathIds}
@@ -1062,6 +1092,8 @@ export function MindWorkspace({
           documentMembership={documentNodeMembership}
           expandedDocumentIds={expandedDocumentIds}
           onToggleDocument={toggleDocumentExpanded}
+          collapsedNodeIds={collapsedNodeIds}
+          onToggleBranchCollapsed={toggleBranchCollapsed}
         />
       </BottomSheet>
 

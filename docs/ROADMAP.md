@@ -107,11 +107,66 @@ Staged plan. Each stage should land in small commits and be usable end-to-end be
   section/chunk/node/edge counts and warnings; node detail shows
   `node_type` pill and section title for any document-origin node.
 
-## Later (not scheduled)
+---
 
+# Product roadmap to v1
+
+The end goal: a personal thinking and planning system. The user unloads
+thoughts and documents, the AI helps develop plans and surface missed
+avenues, and the user explores everything through the canvas or the chat
+companion — with full control over which branches exist and which are
+visible.
+
+## Phase A — Source-Grounded Chat Brain ✅
+
+- `/api/chat` (POST + GET): answers grounded in graph nodes, edges, source
+  chunks, and recent thoughts; persisted conversations; citations.
+- Proposed graph changes reviewed in chat (Add all / Add selected / Dismiss),
+  applied with origin `chat_suggested`. Never auto-applied.
+- Node-focused chat from the node detail sheet.
+- Tables: `chat_conversations`, `chat_messages`, `chat_graph_suggestions`.
+
+## Phase B — Graph usability & source navigation ✅
+
+- Focus/Global view model (`src/lib/graph/view-model.ts`); focus default
+  above 20 nodes; canvas renders a derived view, DB stays source of truth.
+- Documents collapse to a single root node; expand/collapse per document.
+- Deterministic cluster layout with spacing scaled to section count; new
+  clusters placed clear of the existing graph.
+- Stale "Working…" documents reconciled to `processed_with_warnings`
+  (Recovered) or `failed` (`src/lib/documents/reconcile.ts`).
+- Document graph deletion includes section nodes, sections, and chunks.
+- Edge-label thinning, origin badges, larger document roots.
+
+## Phase C — Branch control ✅
+
+- Contract/Expand branch per node: hides/reveals the downstream branch on
+  the canvas with a "+N hidden" badge on the contracted anchor.
+- Delete branch: removes a node and its entire downstream branch (edges,
+  memory links cleared; raw memories preserved; document provenance
+  references nulled) with a count preview and two-step confirm.
+
+## Phase D — Retrieval depth (next)
+
+- Embeddings (pgvector) for node and chunk retrieval; replace keyword
+  overlap in `src/lib/chat/retrieval.ts`. Hybrid score: vector + keyword.
+- Chat memory: prior conversations summarised and retrievable.
+- Cited answers link back to nodes/documents in the UI (tap a citation to
+  focus the node or open the document).
+
+## Phase E — Planning workflows
+
+- "Develop a plan" chat mode: AI proposes a staged plan as a reviewable
+  branch (goal → stages → next steps) anchored to a selected node.
+- Plan nodes get checkable progress state; the canvas shows progress.
+- Periodic "missed avenues" review: AI scans the graph for stale branches,
+  contradictions, and unexplored connections.
+
+## Phase F — Polish for daily use
+
+- Streaming chat responses.
+- Background processing for large documents (status polling instead of one
+  long request).
 - OCR for image-only PDFs.
-- Embedding-based related-node retrieval and document semantic search.
-- Background job queue for large documents.
-- Streaming AI suggestions.
-- Mobile-friendly layout.
-- Multi-step AI reasoning (retrieve → propose → critique).
+- Canvas mini-map and keyboard navigation on desktop.
+- Auto-layout pass for hand-made tangles.

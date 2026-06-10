@@ -304,6 +304,99 @@ export async function deleteNodeAction(
   return { success: true };
 }
 
+// Deletes a node together with its entire downstream branch — every node
+// reachable by following edges source → target from the root. Mirrors the
+// client-side preview in NodeDetail (descendantsOf in view-model.ts) but is
+// recomputed server-side so the client can never delete more than it owns.
+export async function deleteBranchAction(
+  rootNodeId: string,
+): Promise<{ success: boolean; error?: string; nodesDeleted?: number }> {
+  const user = await requireUser();
+  const supabase = await createSupabaseServerClient();
+
+  const { data: root } = await supabase
+    .from("nodes")
+    .select("id")
+    .eq("id", rootNodeId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!root) {
+    return { success: false, error: "Node not found." };
+  }
+
+  // Load the user's edges once and walk the branch (cycle-safe).
+  const { data: allEdges } = await supabase
+    .from("edges")
+    .select("source_node_id, target_node_id")
+    .eq("user_id", user.id);
+
+  const childrenBySource = new Map<string, string[]>();
+  for (const e of allEdges ?? []) {
+    const list = childrenBySource.get(e.source_node_id);
+    if (list) list.push(e.target_node_id);
+    else childrenBySource.set(e.source_node_id, [e.target_node_id]);
+  }
+
+  const branch = new Set<string>([rootNodeId]);
+  const queue = [rootNodeId];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const child of childrenBySource.get(current) ?? []) {
+      if (branch.has(child)) continue;
+      branch.add(child);
+      queue.push(child);
+    }
+  }
+  const branchIds = Array.from(branch);
+
+  // Edges touching the branch in either direction.
+  await supabase
+    .from("edges")
+    .delete()
+    .eq("user_id", user.id)
+    .in("source_node_id", branchIds);
+  await supabase
+    .from("edges")
+    .delete()
+    .eq("user_id", user.id)
+    .in("target_node_id", branchIds);
+
+  // Memory links before nodes (memory entries themselves are preserved).
+  await supabase
+    .from("node_memory_links")
+    .delete()
+    .eq("user_id", user.id)
+    .in("node_id", branchIds);
+
+  // Document provenance rows that point at deleted nodes would dangle via
+  // ON DELETE SET NULL; clear their node_id references cleanly.
+  await supabase
+    .from("document_notes")
+    .update({ node_id: null })
+    .eq("user_id", user.id)
+    .in("node_id", branchIds);
+  await supabase
+    .from("document_sections")
+    .update({ node_id: null })
+    .eq("user_id", user.id)
+    .in("node_id", branchIds);
+
+  const { data: deleted, error } = await supabase
+    .from("nodes")
+    .delete()
+    .eq("user_id", user.id)
+    .in("id", branchIds)
+    .select("id");
+
+  if (error) {
+    return { success: false, error: "Could not delete branch. Please try again." };
+  }
+
+  revalidatePath("/");
+  return { success: true, nodesDeleted: deleted?.length ?? 0 };
+}
+
 export async function deleteEdgeAction(
   edgeId: string,
 ): Promise<{ success: boolean; error?: string }> {
