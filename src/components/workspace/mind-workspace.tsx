@@ -1232,6 +1232,10 @@ export function MindWorkspace({
         onClearFocus={() => setChatFocusNode(null)}
         starter={chatStarter}
         onApplied={() => router.refresh()}
+        onFocusNode={(id) => {
+          setChatOpen(false);
+          handleNodeSelect(id);
+        }}
       />
     </div>
   );

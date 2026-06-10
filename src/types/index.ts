@@ -127,11 +127,17 @@ export type ChatRole = "user" | "assistant";
 export type ChatMode = "global" | "node_focus" | "document_focus" | "graph_review";
 
 // A single source/graph reference the AI used to ground an answer.
-export interface ChatCitation {
+// node_id / document_id are resolved server-side after generation so the
+// UI can make citations tappable (focus the node / jump to the document).
+// Type alias (not interface) so it satisfies the Json index signature when
+// written to citations_json.
+export type ChatCitation = {
   type: "source" | "node";
   label: string;
   ref?: string;
-}
+  node_id?: string;
+  document_id?: string;
+};
 
 // A node the AI proposes adding to the graph. Edges reference nodes by title.
 export interface ProposedNode {

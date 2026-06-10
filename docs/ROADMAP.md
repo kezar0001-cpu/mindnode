@@ -146,13 +146,25 @@ visible.
   memory links cleared; raw memories preserved; document provenance
   references nulled) with a count preview and two-step confirm.
 
-## Phase D — Retrieval depth (next)
+## Phase D — Retrieval depth ✅
 
-- Embeddings (pgvector) for node and chunk retrieval; replace keyword
-  overlap in `src/lib/chat/retrieval.ts`. Hybrid score: vector + keyword.
-- Chat memory: prior conversations summarised and retrievable.
-- Cited answers link back to nodes/documents in the UI (tap a citation to
-  focus the node or open the document).
+- Migration `20260610000000_add_embeddings_and_chat_memory.sql`: pgvector,
+  `nodes.embedding` / `document_chunks.embedding` vector(1536) with HNSW
+  indexes, `chat_conversations.summary`, and user-scoped `match_nodes` /
+  `match_document_chunks` RPCs (SECURITY INVOKER + auth.uid()).
+- Hybrid retrieval (`src/lib/chat/retrieval.ts`): query embedded once;
+  vector similarity blended with keyword overlap (vector 1.0 / keyword 0.5,
+  similarity floor 0.25). Degrades cleanly to keyword-only when the
+  provider or migration is unavailable.
+- Embedding sync (`src/lib/ai/embedding-sync.ts`): inline on node
+  create/update (memory promotion, ghost pin, chat apply), batch after
+  document processing, opportunistic capped backfill in the chat route.
+- Chat memory: rolling per-conversation summary (`chat-summary.ts`,
+  `AI_MODEL_CHAT_SUMMARY`); recent summaries fed into new conversations as
+  PRIOR CONVERSATIONS context.
+- Tappable citations: citation labels resolved server-side to node ids
+  (documents resolve to their root node); tapping a chip closes the chat
+  and focuses the node on the canvas.
 
 ## Phase E — Planning workflows
 

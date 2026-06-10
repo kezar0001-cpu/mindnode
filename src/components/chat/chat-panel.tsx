@@ -33,6 +33,8 @@ type ChatPanelProps = {
   onClearFocus: () => void;
   starter: { prompt: string; nonce: number } | null;
   onApplied: () => void;
+  // Tapping a resolved citation closes the chat and focuses that node.
+  onFocusNode?: (nodeId: string) => void;
 };
 
 let localIdSeq = 0;
@@ -48,6 +50,7 @@ export function ChatPanel({
   onClearFocus,
   starter,
   onApplied,
+  onFocusNode,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -274,7 +277,7 @@ export function ChatPanel({
 
           {messages.map((m) => (
             <div key={m.id}>
-              <MessageBubble message={m} />
+              <MessageBubble message={m} onFocusNode={onFocusNode} />
               {m.role === "assistant" && m.suggestion && (
                 <SuggestionCard
                   suggestion={m.suggestion}
@@ -340,7 +343,13 @@ export function ChatPanel({
   );
 }
 
-function MessageBubble({ message }: { message: UiMessage }) {
+function MessageBubble({
+  message,
+  onFocusNode,
+}: {
+  message: UiMessage;
+  onFocusNode?: (nodeId: string) => void;
+}) {
   const isUser = message.role === "user";
   return (
     <div className={isUser ? "flex justify-end" : "flex justify-start"}>
@@ -355,20 +364,34 @@ function MessageBubble({ message }: { message: UiMessage }) {
         <p className="whitespace-pre-wrap break-words">{message.content}</p>
         {!isUser && message.citations.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5 border-t border-canvas-border pt-2">
-            {message.citations.map((c, i) => (
-              <span
-                key={i}
-                className={[
-                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]",
-                  c.type === "source"
-                    ? "border border-blue-400/40 bg-blue-950/30 text-blue-200"
-                    : "border border-violet-400/40 bg-violet-950/30 text-violet-200",
-                ].join(" ")}
-                title={c.ref}
-              >
-                {c.type === "source" ? "📄" : "◆"} {c.label}
-              </span>
-            ))}
+            {message.citations.map((c, i) => {
+              const className = [
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]",
+                c.type === "source"
+                  ? "border border-blue-400/40 bg-blue-950/30 text-blue-200"
+                  : "border border-violet-400/40 bg-violet-950/30 text-violet-200",
+              ].join(" ");
+              const content = (
+                <>
+                  {c.type === "source" ? "📄" : "◆"} {c.label}
+                </>
+              );
+              return c.node_id && onFocusNode ? (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => onFocusNode(c.node_id!)}
+                  className={`${className} hover:brightness-125`}
+                  title="Show on canvas"
+                >
+                  {content}
+                </button>
+              ) : (
+                <span key={i} className={className} title={c.ref}>
+                  {content}
+                </span>
+              );
+            })}
           </div>
         )}
       </div>

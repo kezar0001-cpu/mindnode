@@ -95,6 +95,14 @@ function buildContextBlock(ctx: RetrievedContext, mode: ChatMode): string {
     );
   }
 
+  if (ctx.priorConversations.length > 0) {
+    parts.push(
+      `PRIOR CONVERSATIONS (summaries of earlier chats with this user — long-term memory; build on decisions and context already discussed):\n${ctx.priorConversations
+        .map((c) => `- ${c.title}: ${c.summary}`)
+        .join("\n")}`,
+    );
+  }
+
   if (mode === "graph_review") {
     parts.push(
       "MODE: GRAPH REVIEW. The user wants help reviewing or expanding their graph structure. Lean toward concrete proposed_graph_changes (new branches, missing links).",

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ProposedGraphChangesSchema } from "@/lib/ai/chat-schema";
+import { syncNodeEmbeddings } from "@/lib/ai/embedding-sync";
 import type { ProposedGraphChanges } from "@/types";
 
 function normalizeTitle(t: string): string {
@@ -66,6 +67,7 @@ export async function applyChatGraphSuggestionAction(input: {
 
   let nodesCreated = 0;
   let nodesReused = 0;
+  const createdNodeIds: string[] = [];
 
   for (const node of changes.nodes) {
     const key = normalizeTitle(node.title);
@@ -90,7 +92,15 @@ export async function applyChatGraphSuggestionAction(input: {
       .single();
     if (error || !created) continue;
     titleToId.set(key, created.id);
+    createdNodeIds.push(created.id);
     nodesCreated += 1;
+  }
+
+  // Embed the new nodes for hybrid retrieval (best-effort, one batch).
+  if (createdNodeIds.length > 0) {
+    await syncNodeEmbeddings(supabase, user.id, { nodeIds: createdNodeIds }).catch(
+      (err) => console.error("Chat node embedding failed:", err),
+    );
   }
 
   // Load existing edges once to dedupe.
