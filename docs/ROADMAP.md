@@ -166,13 +166,23 @@ visible.
   (documents resolve to their root node); tapping a chip closes the chat
   and focuses the node on the canvas.
 
-## Phase E — Planning workflows
+## Phase E — Planning workflows ✅
 
-- "Develop a plan" chat mode: AI proposes a staged plan as a reviewable
-  branch (goal → stages → next steps) anchored to a selected node.
-- Plan nodes get checkable progress state; the canvas shows progress.
-- Periodic "missed avenues" review: AI scans the graph for stale branches,
-  contradictions, and unexplored connections.
+- Migration `20260611000000_add_plan_progress.sql`: `plan` node origin,
+  `nodes.plan_status` (todo / doing / done) with a partial index.
+- "Develop a plan" chat mode (`mode: "plan"`): the companion returns
+  `proposed_graph_changes` with `is_plan: true` — a goal node plus ordered,
+  actionable step nodes joined by `next_step` edges, grounded in the user's
+  context. Reviewed and applied through the existing suggestion pipeline;
+  applied step nodes get `origin: "plan"` and an initial `plan_status` of
+  `todo`. Available from a header chip and node-focused.
+- "Find missed avenues" review (`mode: "graph_review"`): one tap asks the
+  companion to surface isolated nodes, contradictions, and missing links,
+  then propose concrete additions.
+- Plan progress: To do / Doing / Done controls in the node detail sheet
+  (`setPlanStatusAction`, guarded so only plan nodes are trackable). The
+  canvas renders a status dot, the state label, and strikes through done
+  steps.
 
 ## Phase F — Polish for daily use
 

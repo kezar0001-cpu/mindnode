@@ -23,6 +23,7 @@ const VALID_MODES: ChatMode[] = [
   "node_focus",
   "document_focus",
   "graph_review",
+  "plan",
 ];
 
 type ChatBody = {

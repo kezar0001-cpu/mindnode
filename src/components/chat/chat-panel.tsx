@@ -138,8 +138,8 @@ export function ChatPanel({
     });
   }, [messages, open]);
 
-  const send = useCallback(async () => {
-    const text = input.trim();
+  const send = useCallback(async (modeOverride?: ChatMode, overrideText?: string) => {
+    const text = (overrideText ?? input).trim();
     if (!text || sending) return;
 
     const userMsg: UiMessage = {
@@ -153,7 +153,8 @@ export function ChatPanel({
     setSending(true);
     setError(null);
 
-    const mode: ChatMode = focusNode ? "node_focus" : "global";
+    const mode: ChatMode =
+      modeOverride ?? (focusNode ? "node_focus" : "global");
 
     try {
       const res = await fetch("/api/chat", {
@@ -310,6 +311,39 @@ export function ChatPanel({
           className="shrink-0 border-t border-canvas-border bg-canvas-surface px-4 py-3"
           style={{ paddingBottom: "max(12px, calc(env(safe-area-inset-bottom) + 8px))" }}
         >
+          {/* Mode quick actions */}
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              disabled={sending}
+              onClick={() =>
+                send(
+                  "plan",
+                  input.trim() ||
+                    (focusNode
+                      ? `Develop a staged plan for "${focusNode.title}".`
+                      : "Develop a staged plan from my graph and goals."),
+                )
+              }
+              className="rounded-full border border-amber-400/40 bg-amber-950/30 px-2.5 py-1 text-[11px] font-medium text-amber-200 hover:bg-amber-950/50 disabled:opacity-40"
+            >
+              ◇ Develop a plan
+            </button>
+            <button
+              type="button"
+              disabled={sending}
+              onClick={() =>
+                send(
+                  "graph_review",
+                  input.trim() ||
+                    "Review my graph and surface avenues I may have missed.",
+                )
+              }
+              className="rounded-full border border-teal-400/40 bg-teal-950/30 px-2.5 py-1 text-[11px] font-medium text-teal-200 hover:bg-teal-950/50 disabled:opacity-40"
+            >
+              ✦ Find missed avenues
+            </button>
+          </div>
           <div className="flex items-end gap-2">
             <textarea
               ref={inputRef}
@@ -327,7 +361,7 @@ export function ChatPanel({
             />
             <button
               type="button"
-              onClick={send}
+              onClick={() => send()}
               disabled={!input.trim() || sending}
               aria-label="Send"
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-teal-300 text-canvas-bg transition-colors hover:bg-teal-200 disabled:opacity-40"
@@ -418,10 +452,12 @@ function SuggestionCard({
   const [busy, setBusy] = useState(false);
   const [cardError, setCardError] = useState<string | null>(null);
 
+  const isPlan = changes.is_plan === true;
+
   if (status === "applied") {
     return (
       <p className="mt-2 text-[11px] text-emerald-300">
-        ✓ Added to your canvas.
+        {isPlan ? "✓ Plan added to your canvas." : "✓ Added to your canvas."}
       </p>
     );
   }
@@ -439,6 +475,7 @@ function SuggestionCard({
       : {
           nodes: changes.nodes.filter((_, i) => nodeChecked[i]),
           edges: changes.edges.filter((_, i) => edgeChecked[i]),
+          is_plan: changes.is_plan,
         };
     if (selected.nodes.length === 0 && selected.edges.length === 0) {
       setCardError("Select at least one item.");
@@ -465,9 +502,21 @@ function SuggestionCard({
   };
 
   return (
-    <div className="mt-2 rounded-xl border border-violet-400/30 bg-violet-950/15 p-3">
-      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-violet-300/70">
-        Suggested additions
+    <div
+      className={[
+        "mt-2 rounded-xl border p-3",
+        isPlan
+          ? "border-amber-400/30 bg-amber-950/15"
+          : "border-violet-400/30 bg-violet-950/15",
+      ].join(" ")}
+    >
+      <p
+        className={[
+          "mb-2 text-[10px] font-semibold uppercase tracking-wider",
+          isPlan ? "text-amber-300/80" : "text-violet-300/70",
+        ].join(" ")}
+      >
+        {isPlan ? "◇ Suggested plan" : "Suggested additions"}
       </p>
 
       {changes.nodes.length > 0 && (
@@ -527,15 +576,25 @@ function SuggestionCard({
           type="button"
           onClick={() => apply(true)}
           disabled={busy}
-          className="rounded-full bg-violet-400 px-3 py-1 text-[11px] font-medium text-canvas-bg hover:bg-violet-300 disabled:opacity-40"
+          className={[
+            "rounded-full px-3 py-1 text-[11px] font-medium text-canvas-bg disabled:opacity-40",
+            isPlan
+              ? "bg-amber-400 hover:bg-amber-300"
+              : "bg-violet-400 hover:bg-violet-300",
+          ].join(" ")}
         >
-          {busy ? "Adding…" : "Add all"}
+          {busy ? "Adding…" : isPlan ? "Add plan" : "Add all"}
         </button>
         <button
           type="button"
           onClick={() => apply(false)}
           disabled={busy}
-          className="rounded-full border border-violet-400/40 px-3 py-1 text-[11px] font-medium text-violet-200 hover:bg-violet-950/40 disabled:opacity-40"
+          className={[
+            "rounded-full border px-3 py-1 text-[11px] font-medium disabled:opacity-40",
+            isPlan
+              ? "border-amber-400/40 text-amber-200 hover:bg-amber-950/40"
+              : "border-violet-400/40 text-violet-200 hover:bg-violet-950/40",
+          ].join(" ")}
         >
           Add selected
         </button>

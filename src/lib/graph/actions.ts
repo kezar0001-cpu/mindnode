@@ -408,6 +408,44 @@ export async function deleteBranchAction(
   return { success: true, nodesDeleted: deleted?.length ?? 0 };
 }
 
+// Cycles or sets a plan step's progress state. Only nodes that are already
+// part of a plan (plan_status not null) can be tracked, so an ordinary node
+// can't accidentally be turned into a plan step from the UI.
+export async function setPlanStatusAction(
+  nodeId: string,
+  status: "todo" | "doing" | "done",
+): Promise<{ success: boolean; error?: string }> {
+  const user = await requireUser();
+  const supabase = await createSupabaseServerClient();
+
+  const { data: node } = await supabase
+    .from("nodes")
+    .select("id, plan_status")
+    .eq("id", nodeId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!node) {
+    return { success: false, error: "Node not found." };
+  }
+  if (node.plan_status === null) {
+    return { success: false, error: "This node is not a plan step." };
+  }
+
+  const { error } = await supabase
+    .from("nodes")
+    .update({ plan_status: status })
+    .eq("id", nodeId)
+    .eq("user_id", user.id);
+
+  if (error) {
+    return { success: false, error: "Could not update progress." };
+  }
+
+  revalidatePath("/");
+  return { success: true };
+}
+
 export async function deleteEdgeAction(
   edgeId: string,
 ): Promise<{ success: boolean; error?: string }> {

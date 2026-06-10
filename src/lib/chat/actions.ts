@@ -65,6 +65,10 @@ export async function applyChatGraphSuggestionAction(input: {
     titleToId.set(normalizeTitle(n.title), n.id);
   }
 
+  // Plan changes land as tracked plan steps; everything else as chat nodes.
+  const isPlan = changes.is_plan === true;
+  const nodeOrigin = isPlan ? "plan" : "chat_suggested";
+
   let nodesCreated = 0;
   let nodesReused = 0;
   const createdNodeIds: string[] = [];
@@ -85,7 +89,8 @@ export async function applyChatGraphSuggestionAction(input: {
         category: (node.category || "general").trim().slice(0, 40),
         position_x: (Math.random() - 0.5) * 400,
         position_y: (Math.random() - 0.5) * 300,
-        origin: "chat_suggested",
+        origin: nodeOrigin,
+        plan_status: isPlan ? "todo" : null,
         ai_reason: node.reason ? node.reason.trim().slice(0, 600) : null,
       })
       .select("id")

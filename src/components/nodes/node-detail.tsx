@@ -2,7 +2,13 @@
 
 import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import type { GraphNode, GraphEdge, NodeOrigin, EdgeOrigin } from "@/types";
+import type {
+  GraphNode,
+  GraphEdge,
+  NodeOrigin,
+  EdgeOrigin,
+  PlanStatus,
+} from "@/types";
 import type {
   MemoryTrailMap,
   NodeDocumentSource,
@@ -14,6 +20,7 @@ import {
   deleteEdgeAction,
   updateNodeAction,
   updateEdgeAction,
+  setPlanStatusAction,
 } from "@/lib/graph/actions";
 import { categoryColour } from "@/lib/graph/insights";
 import { descendantsOf } from "@/lib/graph/view-model";
@@ -32,6 +39,7 @@ function formatTimestamp(iso: string): string {
 
 function OriginBadge({ origin }: { origin: string }) {
   const isAiPinned = origin === "ai_pinned";
+  const isPlan = origin === "plan";
   const isDocument =
     origin === "document_ai" ||
     origin === "document_root" ||
@@ -51,6 +59,10 @@ function OriginBadge({ origin }: { origin: string }) {
       ? "Document root"
       : origin === "document_section"
       ? "Section"
+      : origin === "chat_suggested"
+      ? "From chat"
+      : origin === "plan"
+      ? "Plan"
       : origin;
 
   return (
@@ -59,6 +71,8 @@ function OriginBadge({ origin }: { origin: string }) {
         "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider",
         isAiPinned
           ? "border border-violet-400/40 bg-violet-950/30 text-violet-200"
+          : isPlan
+          ? "border border-amber-400/40 bg-amber-950/30 text-amber-200"
           : isDocument
           ? "border border-blue-400/40 bg-blue-950/30 text-blue-200"
           : "border border-neutral-700 bg-neutral-800/50 text-neutral-400",
@@ -159,6 +173,9 @@ export function NodeDetail({
   const [edgeError, setEdgeError] = useState<string | null>(null);
   const [isPendingEdge, startEdgeTransition] = useTransition();
 
+  // Plan progress
+  const [isPendingPlan, startPlanTransition] = useTransition();
+
   // Reset all interaction state whenever the user selects a different node.
   useEffect(() => {
     setEditMode(false);
@@ -258,6 +275,14 @@ export function NodeDetail({
       }
       setEditMode(false);
       router.refresh();
+    });
+  };
+
+  // ---- Plan progress handler ----
+  const handleSetPlanStatus = (status: PlanStatus) => {
+    startPlanTransition(async () => {
+      const result = await setPlanStatusAction(node.id, status);
+      if (result.success) router.refresh();
     });
   };
 
@@ -389,6 +414,42 @@ export function NodeDetail({
           )}
         </div>
       </div>
+
+      {/* Plan progress — only for plan-step nodes */}
+      {!editMode && node.plan_status && (
+        <div className="rounded-lg border border-amber-400/30 bg-amber-950/15 p-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-amber-300/70">
+            Plan step
+          </p>
+          <div className="flex gap-1.5">
+            {(["todo", "doing", "done"] as const).map((status) => {
+              const active = node.plan_status === status;
+              const label =
+                status === "todo" ? "To do" : status === "doing" ? "Doing" : "Done";
+              return (
+                <button
+                  key={status}
+                  type="button"
+                  disabled={isPendingPlan}
+                  onClick={() => handleSetPlanStatus(status)}
+                  className={[
+                    "flex-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50",
+                    active
+                      ? status === "done"
+                        ? "border-emerald-400/50 bg-emerald-950/40 text-emerald-200"
+                        : status === "doing"
+                        ? "border-amber-400/50 bg-amber-950/40 text-amber-200"
+                        : "border-neutral-500/50 bg-neutral-800/60 text-neutral-200"
+                      : "border-canvas-border bg-canvas-bg text-neutral-400 hover:text-neutral-200",
+                  ].join(" ")}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Document expand / collapse — only for document root nodes */}
       {!editMode &&

@@ -19,7 +19,7 @@ export async function listNodes(): Promise<GraphNode[]> {
   const { data, error } = await supabase
     .from("nodes")
     .select(
-      "id, user_id, title, summary, category, position_x, position_y, origin, ai_reason, created_at, updated_at",
+      "id, user_id, title, summary, category, position_x, position_y, origin, ai_reason, plan_status, created_at, updated_at",
     )
     .order("created_at", { ascending: true });
   if (error) throw new Error(`Failed to load nodes: ${error.message}`);

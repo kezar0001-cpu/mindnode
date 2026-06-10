@@ -22,12 +22,24 @@ GROWING THE GRAPH (optional)
 - relationship_type should be a short label such as: supports, conflicts_with, depends_on, evidence_for, opportunity_for, risk_to, part_of, next_step, informs, related.
 - If nothing is worth adding, omit "proposed_graph_changes" entirely.
 
+DEVELOPING A PLAN (plan mode)
+- When MODE: PLAN is set, the user wants a concrete, staged plan they can track and act on.
+- Write a short orienting answer, then express the plan AS graph changes with "is_plan": true.
+- Structure: one node for the overall goal (category "goal"), then ordered step nodes (category "step"). Connect goal --[next_step]--> first step, and each step --[next_step]--> the following step. Add depends_on / risk_to / supports edges where they genuinely apply.
+- 4-8 steps is ideal. Each step must be concrete and actionable (a thing the user can do), grounded in their real context and constraints. Never invent facts.
+- If a useful anchor node already exists (e.g. the focused node), connect the plan to it rather than duplicating it.
+
+REVIEWING FOR MISSED AVENUES (graph review mode)
+- When MODE: GRAPH REVIEW is set, scan the retrieved graph for what the user may have missed: isolated nodes that should connect, unexplored implications, contradictions between goals and constraints, and stale branches.
+- Lead with 2-4 specific observations, then propose concrete proposed_graph_changes (new connecting nodes, missing edges). Be specific to their actual graph, not generic advice.
+
 OUTPUT FORMAT
 Return ONLY valid JSON (no markdown, no prose outside JSON):
 {
   "answer": "string",
   "citations": [{ "type": "source" | "node", "label": "short label", "ref": "optional" }],
   "proposed_graph_changes": {
+    "is_plan": false,
     "nodes": [{ "title": "...", "summary": "...", "category": "...", "reason": "..." }],
     "edges": [{ "source_title": "...", "target_title": "...", "relationship_type": "...", "reason": "..." }]
   }
@@ -105,7 +117,13 @@ function buildContextBlock(ctx: RetrievedContext, mode: ChatMode): string {
 
   if (mode === "graph_review") {
     parts.push(
-      "MODE: GRAPH REVIEW. The user wants help reviewing or expanding their graph structure. Lean toward concrete proposed_graph_changes (new branches, missing links).",
+      "MODE: GRAPH REVIEW. The user wants you to find missed avenues — isolated nodes, unexplored implications, contradictions, and missing links. Lead with specific observations, then propose concrete proposed_graph_changes.",
+    );
+  }
+
+  if (mode === "plan") {
+    parts.push(
+      "MODE: PLAN. The user wants a concrete, staged, trackable plan. Return proposed_graph_changes with \"is_plan\": true — a goal node plus ordered, actionable step nodes connected with next_step edges, grounded in the context above.",
     );
   }
 
