@@ -8,7 +8,8 @@ export type AiTask =
   | "document_graph_fast"
   | "ghost_explore"
   | "deep_explore"
-  | "chat";
+  | "chat"
+  | "chat_summary";
 
 const DEFAULTS: Record<AiTask, string> = {
   document_graph: "gpt-4.1",
@@ -16,6 +17,7 @@ const DEFAULTS: Record<AiTask, string> = {
   ghost_explore: "gpt-4o-mini",
   deep_explore: "gpt-4.1",
   chat: "gpt-4o-mini",
+  chat_summary: "gpt-4o-mini",
 };
 
 const ENV_BY_TASK: Record<AiTask, string> = {
@@ -24,6 +26,7 @@ const ENV_BY_TASK: Record<AiTask, string> = {
   ghost_explore: "AI_MODEL_GHOST_EXPLORE",
   deep_explore: "AI_MODEL_DEEP_EXPLORE",
   chat: "AI_MODEL_CHAT",
+  chat_summary: "AI_MODEL_CHAT_SUMMARY",
 };
 
 export function modelForTask(task: AiTask): string {

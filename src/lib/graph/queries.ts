@@ -14,9 +14,13 @@ export type MemoryTrailMap = Record<string, MemoryTrailEntry[]>;
 
 export async function listNodes(): Promise<GraphNode[]> {
   const supabase = await createSupabaseServerClient();
+  // Explicit columns — the embedding vector is large and never needed on
+  // the canvas, so it must not ride along in the page payload.
   const { data, error } = await supabase
     .from("nodes")
-    .select("*")
+    .select(
+      "id, user_id, title, summary, category, position_x, position_y, origin, ai_reason, created_at, updated_at",
+    )
     .order("created_at", { ascending: true });
   if (error) throw new Error(`Failed to load nodes: ${error.message}`);
   return (data as GraphNode[]) ?? [];

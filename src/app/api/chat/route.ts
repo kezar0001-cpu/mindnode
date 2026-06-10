@@ -2,14 +2,19 @@ import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { retrieveChatContext } from "@/lib/chat/retrieval";
+import { retrieveChatContext, type RetrievedContext } from "@/lib/chat/retrieval";
 import { generateChatResponse } from "@/lib/ai/chat";
+import { generateConversationSummary } from "@/lib/ai/chat-summary";
+import {
+  syncChunkEmbeddings,
+  syncNodeEmbeddings,
+} from "@/lib/ai/embedding-sync";
 import {
   getLatestConversationId,
   listMessages,
   listPendingSuggestions,
 } from "@/lib/chat/queries";
-import type { ChatMode } from "@/types";
+import type { ChatCitation, ChatMode } from "@/types";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +31,38 @@ type ChatBody = {
   conversation_id?: string;
   mode?: ChatMode;
 };
+
+// Attach node/document ids to AI citations by matching their labels against
+// the retrieved context, so the UI can make them tappable. Loose contains
+// matching in both directions tolerates the model shortening labels.
+function resolveCitations(
+  citations: ChatCitation[],
+  context: RetrievedContext,
+): ChatCitation[] {
+  const contextNodes = [
+    ...(context.selectedNode ? [context.selectedNode] : []),
+    ...context.neighborNodes,
+    ...context.relevantNodes,
+  ];
+  const labelMatches = (label: string, candidate: string) => {
+    const a = label.toLowerCase().trim();
+    const b = candidate.toLowerCase().trim();
+    return a.length > 0 && b.length > 0 && (a.includes(b) || b.includes(a));
+  };
+  return citations.map((c) => {
+    if (c.type === "node") {
+      const match = contextNodes.find((n) => labelMatches(c.label, n.title));
+      return match ? { ...c, node_id: match.id } : c;
+    }
+    const match = context.chunks.find((ch) => labelMatches(c.label, ch.filename));
+    if (!match) return c;
+    return {
+      ...c,
+      document_id: match.document_id,
+      node_id: match.document_root_node_id ?? undefined,
+    };
+  });
+}
 
 // GET — hydrate the chat panel with the latest conversation, its messages,
 // and any still-pending graph suggestions. Always returns JSON.
@@ -106,16 +143,18 @@ export async function POST(req: Request) {
         ? "node_focus"
         : "global";
 
-    // Resolve (or create) the conversation.
+    // Resolve (or create) the conversation, keeping its rolling summary.
     let conversationId = body.conversation_id ?? null;
+    let previousSummary: string | null = null;
     if (conversationId) {
       const { data: owned } = await supabase
         .from("chat_conversations")
-        .select("id")
+        .select("id, summary")
         .eq("id", conversationId)
         .eq("user_id", user.id)
         .maybeSingle();
       if (!owned) conversationId = null;
+      else previousSummary = owned.summary ?? null;
     }
     if (!conversationId) {
       const { data: created, error } = await supabase
@@ -141,10 +180,21 @@ export async function POST(req: Request) {
       .slice(-8)
       .map((m) => ({ role: m.role, content: m.content }));
 
-    // Retrieve grounding context.
+    // Opportunistic embedding backfill: covers nodes/chunks created before
+    // embeddings existed or while the provider was unavailable. Capped and
+    // best-effort so it never blocks the chat for long.
+    await Promise.all([
+      syncNodeEmbeddings(supabase, user.id, { limit: 64 }),
+      syncChunkEmbeddings(supabase, user.id, { limit: 64 }),
+    ]).catch((err) => {
+      console.error("Embedding backfill failed:", err);
+    });
+
+    // Retrieve grounding context (hybrid vector + keyword).
     const context = await retrieveChatContext(supabase, user.id, {
       query: message,
       selectedNodeId: body.selected_node_id,
+      excludeConversationId: conversationId,
     });
 
     // Generate the grounded answer.
@@ -153,6 +203,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
     }
     const { answer, citations, proposed_graph_changes } = result.response;
+    const resolvedCitations = resolveCitations(citations, context);
 
     const usedNodes = [
       ...(context.selectedNode
@@ -162,11 +213,19 @@ export async function POST(req: Request) {
       ...context.relevantNodes.map((n) => ({ id: n.id, title: n.title })),
     ];
     const seenDocs = new Set<string>();
-    const usedSources: { document_id: string; filename: string }[] = [];
+    const usedSources: {
+      document_id: string;
+      filename: string;
+      root_node_id: string | null;
+    }[] = [];
     for (const c of context.chunks) {
       if (seenDocs.has(c.document_id)) continue;
       seenDocs.add(c.document_id);
-      usedSources.push({ document_id: c.document_id, filename: c.filename });
+      usedSources.push({
+        document_id: c.document_id,
+        filename: c.filename,
+        root_node_id: c.document_root_node_id,
+      });
     }
 
     // Persist the user turn, then the assistant turn.
@@ -185,16 +244,25 @@ export async function POST(req: Request) {
         user_id: user.id,
         role: "assistant",
         content: answer,
-        citations_json: citations,
+        citations_json: resolvedCitations,
         used_context_json: { used_nodes: usedNodes, used_sources: usedSources },
       })
       .select("id")
       .single();
 
-    // Touch the conversation so it sorts to the top.
+    // Refresh the rolling summary (chat memory) and bump the conversation.
+    // Summary failure is non-fatal — the turn is already persisted.
+    const updatedSummary = await generateConversationSummary({
+      previousSummary,
+      userMessage: message,
+      assistantAnswer: answer,
+    });
     await supabase
       .from("chat_conversations")
-      .update({ updated_at: new Date().toISOString() })
+      .update({
+        updated_at: new Date().toISOString(),
+        ...(updatedSummary ? { summary: updatedSummary } : {}),
+      })
       .eq("id", conversationId)
       .eq("user_id", user.id);
 
@@ -223,9 +291,10 @@ export async function POST(req: Request) {
       ok: true,
       conversation_id: conversationId,
       answer,
-      citations,
+      citations: resolvedCitations,
       used_nodes: usedNodes,
       used_sources: usedSources,
+      retrieval_mode: context.retrievalMode,
       proposed_graph_changes: hasChanges
         ? { ...proposed_graph_changes, suggestion_id: suggestionId }
         : undefined,

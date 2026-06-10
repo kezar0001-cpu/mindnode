@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { requireUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { syncNodeEmbeddings } from "@/lib/ai/embedding-sync";
 import { findRelatedNodesByKeywords } from "./keyword-link";
 
 export async function updateNodePositionAction(
@@ -172,6 +173,11 @@ export async function createNodeFromMemoryAction(
     console.error("Auto-link failed:", err);
   }
 
+  // Embed the new node for hybrid retrieval (best-effort).
+  await syncNodeEmbeddings(supabase, user.id, { nodeIds: [node.id] }).catch(
+    (err) => console.error("Node embedding failed:", err),
+  );
+
   revalidatePath("/");
   return { success: true };
 }
@@ -254,6 +260,11 @@ export async function pinGhostSuggestionAction(input: {
       // Node was created successfully — keep it, surface a soft warning.
     }
   }
+
+  // Embed the new node for hybrid retrieval (best-effort).
+  await syncNodeEmbeddings(supabase, user.id, { nodeIds: [node.id] }).catch(
+    (err) => console.error("Node embedding failed:", err),
+  );
 
   revalidatePath("/");
   return { success: true, node_id: node.id };
@@ -464,6 +475,11 @@ export async function updateNodeAction(
   if (error) {
     return { success: false, error: "Could not update node. Please try again." };
   }
+
+  // Content changed — refresh the embedding so retrieval stays accurate.
+  await syncNodeEmbeddings(supabase, user.id, { nodeIds: [nodeId] }).catch(
+    (err) => console.error("Node embedding refresh failed:", err),
+  );
 
   revalidatePath("/");
   return { success: true };

@@ -7,6 +7,10 @@ import {
   type SectionGraph,
 } from "@/lib/ai/document-graph-schema";
 import { callJsonForTask, callStructuredForTask } from "@/lib/ai/router";
+import {
+  syncChunkEmbeddings,
+  syncNodeEmbeddings,
+} from "@/lib/ai/embedding-sync";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { computeDocumentClusterLayout } from "./layout";
 import {
@@ -638,6 +642,21 @@ export async function processDocumentGraph(
     if (!sectionGotNodes) {
       sectionsWithWarnings.push(section.index);
     }
+  }
+
+  // ---- Embeddings --------------------------------------------------------
+  // Batch-embed everything this document created (plus any older backlog,
+  // since the sync selects null-embedding rows). Best-effort: retrieval
+  // falls back to keywords for anything missed, and the chat route backfills.
+  try {
+    await syncNodeEmbeddings(supabase, args.userId, { limit: 400 });
+    await syncChunkEmbeddings(supabase, args.userId, { limit: 400 });
+  } catch (err) {
+    warnings.push("Embedding generation failed; retrieval will use keywords.");
+    logDocumentGraph("embedding sync failed", {
+      documentId: args.documentId,
+      error: err instanceof Error ? err.message : "unknown",
+    });
   }
 
   // ---- Quality guard ----------------------------------------------------

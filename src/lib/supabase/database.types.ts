@@ -61,6 +61,8 @@ export interface Database {
           // — enforced by DB CHECK constraint.
           origin: string;
           ai_reason: string | null;
+          // pgvector(1536), text representation. Excluded from list selects.
+          embedding: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -74,6 +76,7 @@ export interface Database {
           position_y?: number;
           origin?: string;
           ai_reason?: string | null;
+          embedding?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -87,6 +90,7 @@ export interface Database {
           position_y?: number;
           origin?: string;
           ai_reason?: string | null;
+          embedding?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -292,6 +296,8 @@ export interface Database {
           section_title: string | null;
           section_level: number | null;
           section_index: number | null;
+          // pgvector(1536), text representation.
+          embedding: string | null;
           created_at: string;
         };
         Insert: {
@@ -306,6 +312,7 @@ export interface Database {
           section_title?: string | null;
           section_level?: number | null;
           section_index?: number | null;
+          embedding?: string | null;
           created_at?: string;
         };
         Update: {
@@ -320,6 +327,7 @@ export interface Database {
           section_title?: string | null;
           section_level?: number | null;
           section_index?: number | null;
+          embedding?: string | null;
           created_at?: string;
         };
         Relationships: [
@@ -494,6 +502,8 @@ export interface Database {
           id: string;
           user_id: string;
           title: string;
+          // Rolling AI-maintained summary; becomes retrievable chat memory.
+          summary: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -501,6 +511,7 @@ export interface Database {
           id?: string;
           user_id: string;
           title?: string;
+          summary?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -508,6 +519,7 @@ export interface Database {
           id?: string;
           user_id?: string;
           title?: string;
+          summary?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -665,7 +677,29 @@ export interface Database {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      match_nodes: {
+        Args: { query_embedding: string; match_count?: number };
+        Returns: {
+          id: string;
+          title: string;
+          summary: string;
+          category: string;
+          origin: string;
+          similarity: number;
+        }[];
+      };
+      match_document_chunks: {
+        Args: { query_embedding: string; match_count?: number };
+        Returns: {
+          id: string;
+          document_id: string;
+          content: string;
+          section_title: string | null;
+          similarity: number;
+        }[];
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
