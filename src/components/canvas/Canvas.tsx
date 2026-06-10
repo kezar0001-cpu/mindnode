@@ -30,6 +30,8 @@ type MindNodeData = Record<string, unknown> & {
   focused?: boolean;
   connected?: boolean;
   dimmed?: boolean;
+  // Number of downstream nodes hidden because this branch is contracted.
+  collapsedCount?: number;
   categoryStroke: string;
   categoryGlow: string;
   categoryBg: string;
@@ -151,6 +153,11 @@ function MindNodeComponent({ data, selected }: NodeProps<Node<MindNodeData>>) {
         >
           {data.label}
         </p>
+        {typeof data.collapsedCount === "number" && data.collapsedCount > 0 && (
+          <p className="mt-1 text-[9px] font-medium text-neutral-400">
+            +{data.collapsedCount} hidden
+          </p>
+        )}
       </div>
       <Handle
         type="source"
@@ -242,7 +249,10 @@ function GhostPathFocusController({
   return null;
 }
 
-function toFlowNodes(dbNodes: GraphNode[]): Node<MindNodeData>[] {
+function toFlowNodes(
+  dbNodes: GraphNode[],
+  collapsedCounts?: Record<string, number>,
+): Node<MindNodeData>[] {
   return dbNodes.map((n) => {
     const colours = categoryColour(n.category || "general");
     return {
@@ -252,6 +262,7 @@ function toFlowNodes(dbNodes: GraphNode[]): Node<MindNodeData>[] {
       data: {
         label: n.title,
         origin: n.origin,
+        collapsedCount: collapsedCounts?.[n.id],
         categoryStroke: colours.stroke,
         categoryGlow: colours.glow,
         categoryBg: colours.bg,
@@ -265,6 +276,7 @@ type CanvasProps = {
   dbEdges: GraphEdge[];
   selectedNodeId: string | null;
   onNodeSelect: (id: string | null) => void;
+  collapsedCounts?: Record<string, number>;
   ghostSuggestions: GhostSuggestion[];
   activeRootNodeId: string | null;
   activeGhostPathIds: string[];
@@ -280,6 +292,7 @@ export function Canvas({
   dbEdges,
   selectedNodeId,
   onNodeSelect,
+  collapsedCounts,
   ghostSuggestions,
   activeRootNodeId,
   activeGhostPathIds,
@@ -441,7 +454,7 @@ export function Canvas({
           .filter((n) => n.type !== "ghostNode")
           .map((n) => [n.id, n.position]),
       );
-      const realNodes = toFlowNodes(dbNodes).map((n) => {
+      const realNodes = toFlowNodes(dbNodes, collapsedCounts).map((n) => {
         const position = prevPos.get(n.id) ?? n.position;
         const focused = n.id === selectedNodeId;
         const connected = connectedIds.has(n.id);
@@ -450,7 +463,7 @@ export function Canvas({
       });
       return [...realNodes, ...ghostFlowNodes];
     });
-  }, [dbNodes, ghostFlowNodes, selectedNodeId, connectedIds, setNodes]);
+  }, [dbNodes, ghostFlowNodes, selectedNodeId, connectedIds, collapsedCounts, setNodes]);
 
   const onNodeDragStop: OnNodeDrag = useCallback((_event, node) => {
     if (node.type === "ghostNode") return;

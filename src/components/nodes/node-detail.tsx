@@ -10,11 +10,13 @@ import type {
 import {
   createEdgeAction,
   deleteNodeAction,
+  deleteBranchAction,
   deleteEdgeAction,
   updateNodeAction,
   updateEdgeAction,
 } from "@/lib/graph/actions";
 import { categoryColour } from "@/lib/graph/insights";
+import { descendantsOf } from "@/lib/graph/view-model";
 
 const trailFormatter = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -102,6 +104,8 @@ type NodeDetailProps = {
   documentMembership?: Record<string, string>;
   expandedDocumentIds?: Set<string>;
   onToggleDocument?: (documentId: string) => void;
+  collapsedNodeIds?: Set<string>;
+  onToggleBranchCollapsed?: (nodeId: string) => void;
 };
 
 export function NodeDetail({
@@ -120,6 +124,8 @@ export function NodeDetail({
   documentMembership,
   expandedDocumentIds,
   onToggleDocument,
+  collapsedNodeIds,
+  onToggleBranchCollapsed,
 }: NodeDetailProps) {
   const router = useRouter();
 
@@ -143,6 +149,9 @@ export function NodeDetail({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isPendingDelete, startDeleteTransition] = useTransition();
 
+  // Delete branch (two-step)
+  const [deleteBranchConfirm, setDeleteBranchConfirm] = useState(false);
+
   // Edge controls
   const [editingEdgeId, setEditingEdgeId] = useState<string | null>(null);
   const [editingRelType, setEditingRelType] = useState("");
@@ -158,6 +167,7 @@ export function NodeDetail({
     setEditCategory("");
     setEditError(null);
     setDeleteConfirm(false);
+    setDeleteBranchConfirm(false);
     setDeleteError(null);
     setEditingEdgeId(null);
     setEditingRelType("");
@@ -196,6 +206,17 @@ export function NodeDetail({
     .filter((c) => c.other !== undefined);
 
   const candidates = nodes.filter((n) => n.id !== node.id);
+
+  // Downstream branch (nodes reachable via outgoing edges). Powers the
+  // contract/expand toggle and the branch-delete preview count.
+  const branchDescendantCount = descendantsOf(
+    edges.map((e) => ({
+      source_node_id: e.source_node_id,
+      target_node_id: e.target_node_id,
+    })),
+    node.id,
+  ).size;
+  const isBranchContracted = collapsedNodeIds?.has(node.id) ?? false;
 
   // ---- Connect handler ----
   const handleConnect = () => {
@@ -244,6 +265,7 @@ export function NodeDetail({
   const handleDeleteNode = () => {
     if (!deleteConfirm) {
       setDeleteConfirm(true);
+      setDeleteBranchConfirm(false);
       return;
     }
     setDeleteError(null);
@@ -252,6 +274,25 @@ export function NodeDetail({
       if (!result.success) {
         setDeleteError(result.error ?? "Could not delete node.");
         setDeleteConfirm(false);
+        return;
+      }
+      router.refresh();
+      onNodeDeleted();
+    });
+  };
+
+  const handleDeleteBranch = () => {
+    if (!deleteBranchConfirm) {
+      setDeleteBranchConfirm(true);
+      setDeleteConfirm(false);
+      return;
+    }
+    setDeleteError(null);
+    startDeleteTransition(async () => {
+      const result = await deleteBranchAction(node.id);
+      if (!result.success) {
+        setDeleteError(result.error ?? "Could not delete branch.");
+        setDeleteBranchConfirm(false);
         return;
       }
       router.refresh();
@@ -415,7 +456,18 @@ export function NodeDetail({
                 onClick={() => onExpandBranch(node.id)}
                 className="rounded-full border border-canvas-border bg-canvas-bg px-2.5 py-1 text-[11px] font-medium text-neutral-300 hover:border-teal-300/40 hover:text-teal-300"
               >
-                Expand branch
+                Widen focus
+              </button>
+            )}
+            {onToggleBranchCollapsed && branchDescendantCount > 0 && (
+              <button
+                type="button"
+                onClick={() => onToggleBranchCollapsed(node.id)}
+                className="rounded-full border border-canvas-border bg-canvas-bg px-2.5 py-1 text-[11px] font-medium text-neutral-300 hover:border-teal-300/40 hover:text-teal-300"
+              >
+                {isBranchContracted
+                  ? `Expand branch (${branchDescendantCount})`
+                  : `Contract branch (${branchDescendantCount})`}
               </button>
             )}
             {onHideUnrelated && (
@@ -815,7 +867,7 @@ export function NodeDetail({
             )}
           </div>
 
-          {/* Delete node section */}
+          {/* Delete node / branch section */}
           <div className="border-t border-canvas-border pt-4">
             {deleteError && (
               <p className="mb-2 text-xs text-red-400">{deleteError}</p>
@@ -843,14 +895,50 @@ export function NodeDetail({
                   </button>
                 </div>
               </div>
+            ) : deleteBranchConfirm ? (
+              <div className="rounded-lg border border-red-500/30 bg-red-950/20 p-3">
+                <p className="mb-2 text-xs text-red-300">
+                  Delete this thought and its {branchDescendantCount} downstream
+                  thought{branchDescendantCount === 1 ? "" : "s"}? Raw memories
+                  are kept, but the nodes and their connections are removed.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteBranchConfirm(false)}
+                    className="text-xs text-neutral-400 hover:text-neutral-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteBranch}
+                    disabled={isPendingDelete}
+                    className="rounded bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-40"
+                  >
+                    {isPendingDelete ? "Deleting…" : "Delete branch"}
+                  </button>
+                </div>
+              </div>
             ) : (
-              <button
-                type="button"
-                onClick={handleDeleteNode}
-                className="text-xs text-red-500/70 hover:text-red-400"
-              >
-                Delete node
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleDeleteNode}
+                  className="text-xs text-red-500/70 hover:text-red-400"
+                >
+                  Delete node
+                </button>
+                {branchDescendantCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteBranch}
+                    className="text-xs text-red-500/70 hover:text-red-400"
+                  >
+                    Delete branch ({branchDescendantCount + 1})
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </>
