@@ -6,6 +6,7 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  MiniMap,
   Handle,
   Position,
   useNodesState,
@@ -229,6 +230,100 @@ function FocusController({
     const z = Math.max(getZoom(), 1.0);
     setCenter(n.position_x + 80, n.position_y + 25, { zoom: z, duration: 550 });
   }, [selectedNodeId, dbNodes, setCenter, getZoom]);
+  return null;
+}
+
+// Keyboard navigation. Arrow keys move the selection to the nearest visible
+// node in that direction (preferring connected neighbours); Escape clears the
+// selection. Ignored while the user is typing in a field, so it never fights
+// the chat composer or edit forms.
+function KeyboardNavController({
+  dbNodes,
+  dbEdges,
+  selectedNodeId,
+  onNodeSelect,
+}: {
+  dbNodes: GraphNode[];
+  dbEdges: GraphEdge[];
+  selectedNodeId: string | null;
+  onNodeSelect: (id: string | null) => void;
+}) {
+  useEffect(() => {
+    const isTypingTarget = (el: EventTarget | null): boolean => {
+      if (!(el instanceof HTMLElement)) return false;
+      const tag = el.tagName;
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        el.isContentEditable
+      );
+    };
+
+    const handler = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+
+      if (e.key === "Escape") {
+        if (selectedNodeId) {
+          e.preventDefault();
+          onNodeSelect(null);
+        }
+        return;
+      }
+
+      const directions: Record<string, [number, number]> = {
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+      };
+      const dir = directions[e.key];
+      if (!dir) return;
+      if (dbNodes.length === 0) return;
+      e.preventDefault();
+
+      // With nothing selected, an arrow key selects the top-left-most node.
+      if (!selectedNodeId) {
+        const first = [...dbNodes].sort(
+          (a, b) =>
+            a.position_y - b.position_y || a.position_x - b.position_x,
+        )[0];
+        if (first) onNodeSelect(first.id);
+        return;
+      }
+
+      const current = dbNodes.find((n) => n.id === selectedNodeId);
+      if (!current) return;
+
+      const connected = new Set<string>();
+      for (const edge of dbEdges) {
+        if (edge.source_node_id === selectedNodeId) connected.add(edge.target_node_id);
+        if (edge.target_node_id === selectedNodeId) connected.add(edge.source_node_id);
+      }
+
+      // Score candidates by how well they sit in the requested direction:
+      // the dot product against the direction vector must be positive, and
+      // we prefer the smallest off-axis drift. Connected nodes get a boost.
+      let best: { id: string; score: number } | null = null;
+      for (const n of dbNodes) {
+        if (n.id === selectedNodeId) continue;
+        const dx = n.position_x - current.position_x;
+        const dy = n.position_y - current.position_y;
+        const along = dx * dir[0] + dy * dir[1];
+        if (along <= 0) continue;
+        const off = Math.abs(dx * dir[1] - dy * dir[0]);
+        if (off > along) continue; // outside a ~45° cone
+        const dist = Math.hypot(dx, dy);
+        const score = dist + off * 0.5 - (connected.has(n.id) ? 220 : 0);
+        if (!best || score < best.score) best = { id: n.id, score };
+      }
+      if (best) onNodeSelect(best.id);
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [dbNodes, dbEdges, selectedNodeId, onNodeSelect]);
+
   return null;
 }
 
@@ -592,6 +687,12 @@ export function Canvas({
       className="bg-canvas-bg"
     >
       <FocusController selectedNodeId={selectedNodeId} dbNodes={dbNodes} />
+      <KeyboardNavController
+        dbNodes={dbNodes}
+        dbEdges={dbEdges}
+        selectedNodeId={selectedNodeId}
+        onNodeSelect={onNodeSelect}
+      />
       <GhostPathFocusController
         activeRootNodeId={activeRootNodeId}
         activeGhostPathIds={activeGhostPathIds}
@@ -614,6 +715,34 @@ export function Canvas({
         }}
         showInteractive={false}
       />
+      {/* Mini-map — hidden on small screens to preserve the mobile canvas;
+          shows the whole graph for orientation on larger viewports. */}
+      <MiniMap
+        pannable
+        zoomable
+        position="bottom-right"
+        className="!hidden sm:!block"
+        style={{
+          background: "#15181f",
+          border: "1px solid #262a33",
+          borderRadius: 6,
+        }}
+        maskColor="rgba(8, 10, 14, 0.7)"
+        nodeColor={miniMapNodeColor}
+        nodeStrokeWidth={2}
+      />
     </ReactFlow>
   );
+}
+
+// Colour each mini-map dot by node kind so the overview stays legible:
+// the selected node pops teal, ghosts stay purple, document roots blue,
+// plan steps amber, everything else its category stroke.
+function miniMapNodeColor(node: Node): string {
+  if (node.type === "ghostNode") return "#a78bfa";
+  const data = node.data as Partial<MindNodeData> | undefined;
+  if (data?.focused) return "#5eead4";
+  if (data?.planStatus) return "#fbbf24";
+  if (data?.origin === "document_root") return "#60a5fa";
+  return (data?.categoryStroke as string) || "#3a3f4b";
 }

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/supabase/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { syncNodeEmbeddings } from "@/lib/ai/embedding-sync";
+import { declutterPositions } from "./declutter";
 import { findRelatedNodesByKeywords } from "./keyword-link";
 
 export async function updateNodePositionAction(
@@ -25,6 +26,46 @@ export async function updateNodePositionAction(
     // Position persistence failure is non-critical — log and move on.
     console.error("Failed to persist node position:", error.message);
   }
+}
+
+// Tidies overlapping nodes by spreading them to a minimum spacing, then
+// persists only the nodes that actually moved. Positions are recomputed
+// server-side from the user's own nodes, so the client can't move anything
+// it doesn't own. Returns how many nodes shifted.
+export async function declutterGraphAction(): Promise<{
+  success: boolean;
+  moved: number;
+  error?: string;
+}> {
+  const user = await requireUser();
+  const supabase = await createSupabaseServerClient();
+
+  const { data: nodes, error } = await supabase
+    .from("nodes")
+    .select("id, position_x, position_y")
+    .eq("user_id", user.id);
+
+  if (error || !nodes) {
+    return { success: false, moved: 0, error: "Could not load the graph." };
+  }
+
+  const moves = declutterPositions(nodes);
+  if (moves.length === 0) {
+    return { success: true, moved: 0 };
+  }
+
+  await Promise.all(
+    moves.map((m) =>
+      supabase
+        .from("nodes")
+        .update({ position_x: m.position_x, position_y: m.position_y })
+        .eq("id", m.id)
+        .eq("user_id", user.id),
+    ),
+  );
+
+  revalidatePath("/");
+  return { success: true, moved: moves.length };
 }
 
 // Derive a short node title from raw thought content.

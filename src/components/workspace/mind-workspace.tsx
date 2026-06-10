@@ -10,7 +10,10 @@ import { DocumentList } from "@/components/documents/document-list";
 import { DocumentUploadSheet } from "@/components/documents/document-upload-sheet";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { signOutAction } from "@/app/login/actions";
-import { pinGhostSuggestionAction } from "@/lib/graph/actions";
+import {
+  pinGhostSuggestionAction,
+  declutterGraphAction,
+} from "@/lib/graph/actions";
 import { deriveInsights, summarizeInsights, type Insight } from "@/lib/graph/insights";
 import {
   computeVisibleNodeIds,
@@ -578,6 +581,30 @@ export function MindWorkspace({
     setPinningGhostIds([]);
   }, []);
 
+  const [decluttering, setDecluttering] = useState(false);
+  const handleDeclutter = useCallback(async () => {
+    if (decluttering) return;
+    setDecluttering(true);
+    try {
+      const result = await declutterGraphAction();
+      if (!result.success) {
+        setAiError(result.error ?? "Could not tidy the graph.");
+        return;
+      }
+      setUploadToast(
+        result.moved === 0
+          ? "Graph is already tidy."
+          : `Tidied ${result.moved} node${result.moved === 1 ? "" : "s"}.`,
+      );
+      router.refresh();
+      setTimeout(() => setUploadToast(null), 4000);
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "Could not tidy the graph.");
+    } finally {
+      setDecluttering(false);
+    }
+  }, [decluttering, router]);
+
   const handleGhostDismiss = useCallback((ghostId: string) => {
     setGhosts((prev) => {
       const removed = new Set<string>([ghostId]);
@@ -999,6 +1026,28 @@ export function MindWorkspace({
               <circle cx="7.5" cy="7.5" r="2" stroke="currentColor" strokeWidth="1.3" />
             </svg>
           )}
+        </button>
+        <div className="h-4 w-px bg-canvas-border" />
+        {/* Tidy — spread overlapping nodes apart */}
+        <button
+          type="button"
+          onClick={handleDeclutter}
+          disabled={decluttering}
+          aria-label="Tidy graph layout"
+          title="Tidy — spread overlapping nodes apart"
+          className={[
+            "flex h-7 w-7 items-center justify-center rounded-full transition-colors",
+            decluttering
+              ? "text-neutral-600"
+              : "text-neutral-400 hover:text-teal-300",
+          ].join(" ")}
+        >
+          <svg width="14" height="14" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+            <rect x="1.5" y="1.5" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.3" />
+            <rect x="9.5" y="2.5" width="3.5" height="3.5" rx="1" stroke="currentColor" strokeWidth="1.3" />
+            <rect x="2.5" y="9.5" width="3.5" height="3.5" rx="1" stroke="currentColor" strokeWidth="1.3" />
+            <rect x="9.5" y="9.5" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.3" />
+          </svg>
         </button>
         {ghosts.length > 0 && (
           <>
