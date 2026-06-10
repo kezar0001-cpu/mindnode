@@ -19,9 +19,12 @@ function formatTimestamp(iso: string): string {
 export function RecentThoughtsList({
   entries,
   promotedMemoryIds,
+  onSuggestPlacement,
 }: {
   entries: RecentMemoryEntry[];
   promotedMemoryIds: string[];
+  // Opens the AI capture-suggestion review for this memory entry.
+  onSuggestPlacement?: (memoryId: string) => void;
 }) {
   const promotedSet = new Set(promotedMemoryIds);
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -75,18 +78,30 @@ export function RecentThoughtsList({
               <p className="mt-1.5 text-xs text-red-400">{error}</p>
             )}
 
-            <div className="mt-2">
+            <div className="mt-2 flex items-center gap-3">
               {isPromoted ? (
                 <span className="text-xs text-neutral-600">On canvas</span>
               ) : (
-                <button
-                  type="button"
-                  disabled={!!pendingId}
-                  onClick={() => handleAddToCanvas(entry.id)}
-                  className="text-xs text-neutral-500 hover:text-neutral-300 disabled:opacity-40"
-                >
-                  {isPending ? "Adding…" : "+ Add to canvas"}
-                </button>
+                <>
+                  {onSuggestPlacement && (
+                    <button
+                      type="button"
+                      disabled={!!pendingId}
+                      onClick={() => onSuggestPlacement(entry.id)}
+                      className="text-xs font-medium text-teal-300 hover:text-teal-200 disabled:opacity-40"
+                    >
+                      ✦ Add with AI
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={!!pendingId}
+                    onClick={() => handleAddToCanvas(entry.id)}
+                    className="text-xs text-neutral-500 hover:text-neutral-300 disabled:opacity-40"
+                  >
+                    {isPending ? "Adding…" : "+ Add as-is"}
+                  </button>
+                </>
               )}
             </div>
           </li>

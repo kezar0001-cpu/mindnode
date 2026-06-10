@@ -6,14 +6,24 @@ import { Canvas, type GhostSuggestion } from "@/components/canvas/Canvas";
 import { NodeDetail } from "@/components/nodes/node-detail";
 import { ThoughtInputForm } from "@/components/input/thought-input-form";
 import { RecentThoughtsList } from "@/components/input/recent-thoughts-list";
+import {
+  SuggestionReview,
+  type CaptureReviewState,
+} from "@/components/input/suggestion-review";
 import { DocumentList } from "@/components/documents/document-list";
 import { DocumentUploadSheet } from "@/components/documents/document-upload-sheet";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { signOutAction } from "@/app/login/actions";
 import {
+  createNodeFromMemoryAction,
   pinGhostSuggestionAction,
   declutterGraphAction,
 } from "@/lib/graph/actions";
+import {
+  applyCaptureSuggestionAction,
+  dismissCaptureSuggestionAction,
+} from "@/lib/graph/suggestion-actions";
+import type { CaptureSuggestionResponse } from "@/lib/ai/suggest-schema";
 import { deriveInsights, summarizeInsights, type Insight } from "@/lib/graph/insights";
 import {
   computeVisibleNodeIds,
@@ -49,6 +59,7 @@ type ActiveSheet =
   | "insights"
   | "documents"
   | "upload"
+  | "suggestion"
   | null;
 
 type ApiSuggestion = {
@@ -251,6 +262,97 @@ export function MindWorkspace({
     [],
   );
 
+  // Capture suggestion review — the AI's proposal for a just-saved thought.
+  const [captureReview, setCaptureReview] = useState<CaptureReviewState | null>(null);
+  const [addAsIsPending, setAddAsIsPending] = useState(false);
+
+  const requestSuggestion = useCallback(async (memoryId: string) => {
+    setCaptureReview({ phase: "loading", memoryId });
+    setActiveSheet("suggestion");
+    try {
+      const res = await fetch("/api/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memory_entry_id: memoryId }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setCaptureReview({
+          phase: "error",
+          memoryId,
+          error: json.error ?? "Could not get a suggestion.",
+        });
+        return;
+      }
+      setCaptureReview({
+        phase: "ready",
+        memoryId,
+        data: json as CaptureSuggestionResponse,
+      });
+    } catch {
+      setCaptureReview({ phase: "error", memoryId, error: "Network error." });
+    }
+  }, []);
+
+  const handleSuggestionAccept = useCallback(async () => {
+    if (!captureReview || captureReview.phase !== "ready") return;
+    const { memoryId, data } = captureReview;
+    setCaptureReview({ phase: "applying", memoryId, data });
+    const result = await applyCaptureSuggestionAction(data.suggestion_id);
+    if (!result.success) {
+      setCaptureReview({
+        phase: "error",
+        memoryId,
+        error: result.error ?? "Could not apply the suggestion.",
+      });
+      return;
+    }
+    setCaptureReview(null);
+    setActiveSheet(null);
+    setUploadToast(
+      result.action === "update_node"
+        ? "Updated the existing thought."
+        : "Added to your canvas.",
+    );
+    router.refresh();
+    setTimeout(() => setUploadToast(null), 4000);
+  }, [captureReview, router]);
+
+  const handleSuggestionDismiss = useCallback(() => {
+    if (captureReview && (captureReview.phase === "ready" || captureReview.phase === "applying")) {
+      void dismissCaptureSuggestionAction(captureReview.data.suggestion_id);
+    }
+    setCaptureReview(null);
+    setActiveSheet(null);
+  }, [captureReview]);
+
+  const handleSuggestionAddAsIs = useCallback(async () => {
+    if (!captureReview) return;
+    const { memoryId } = captureReview;
+    setAddAsIsPending(true);
+    try {
+      const result = await createNodeFromMemoryAction(memoryId);
+      if (!result.success && result.error !== "already_on_canvas") {
+        setCaptureReview({
+          phase: "error",
+          memoryId,
+          error: result.error ?? "Could not add to canvas.",
+        });
+        return;
+      }
+      if (captureReview.phase === "ready" || captureReview.phase === "applying") {
+        void dismissCaptureSuggestionAction(captureReview.data.suggestion_id);
+      }
+      setCaptureReview(null);
+      setActiveSheet(null);
+      setUploadToast("Added to your canvas.");
+      router.refresh();
+      setTimeout(() => setUploadToast(null), 4000);
+    } finally {
+      setAddAsIsPending(false);
+    }
+  }, [captureReview, router]);
+
   // Insights derived from the in-memory graph.
   const insights = useMemo(
     () => deriveInsights(initialNodes, initialEdges),
@@ -339,6 +441,7 @@ export function MindWorkspace({
   const closeSheet = useCallback(() => {
     setActiveSheet(null);
     setSelectedNodeId(null);
+    setCaptureReview(null);
   }, []);
 
   const handleNodeSelect = useCallback((id: string | null) => {
@@ -766,6 +869,13 @@ export function MindWorkspace({
     [handleSuggestAvenues],
   );
 
+  // Thoughts captured but not yet on the canvas — surfaced as a header badge
+  // so brain-dumps don't silently accumulate unseen.
+  const unpromotedCount = useMemo(() => {
+    const promoted = new Set(promotedMemoryIds);
+    return recentEntries.filter((e) => !promoted.has(e.id)).length;
+  }, [recentEntries, promotedMemoryIds]);
+
   const sheetOpen = activeSheet !== null;
   const suggestLabel = aiLoading
     ? "Thinking…"
@@ -921,15 +1031,24 @@ export function MindWorkspace({
           <button
             type="button"
             onClick={() => openSheet("thoughts")}
-            aria-label="Recent thoughts"
+            aria-label={
+              unpromotedCount > 0
+                ? `Recent thoughts — ${unpromotedCount} not yet on the canvas`
+                : "Recent thoughts"
+            }
+            title={
+              unpromotedCount > 0
+                ? `${unpromotedCount} thought${unpromotedCount === 1 ? "" : "s"} not yet on the canvas`
+                : "Recent thoughts"
+            }
             className="relative flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
           >
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
               <path d="M1 3h11M1 6.5h8M1 10h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
             </svg>
-            {recentEntries.length > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-neutral-600 text-[8px] font-bold leading-none text-white">
-                {Math.min(recentEntries.length, 9)}
+            {unpromotedCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-teal-600 text-[8px] font-bold leading-none text-white">
+                {Math.min(unpromotedCount, 9)}
               </span>
             )}
           </button>
@@ -1104,7 +1223,24 @@ export function MindWorkspace({
         onClose={closeSheet}
         title="New thought"
       >
-        <ThoughtInputForm onSuccess={closeSheet} />
+        <ThoughtInputForm onSuccess={requestSuggestion} />
+      </BottomSheet>
+
+      <BottomSheet
+        open={activeSheet === "suggestion"}
+        onClose={handleSuggestionDismiss}
+        title="Where it belongs"
+      >
+        {captureReview && (
+          <SuggestionReview
+            state={captureReview}
+            onAccept={handleSuggestionAccept}
+            onDismiss={handleSuggestionDismiss}
+            onAddAsIs={handleSuggestionAddAsIs}
+            onRetry={() => requestSuggestion(captureReview.memoryId)}
+            addAsIsPending={addAsIsPending}
+          />
+        )}
       </BottomSheet>
 
       <BottomSheet
@@ -1115,6 +1251,7 @@ export function MindWorkspace({
         <RecentThoughtsList
           entries={recentEntries}
           promotedMemoryIds={promotedMemoryIds}
+          onSuggestPlacement={requestSuggestion}
         />
       </BottomSheet>
 
