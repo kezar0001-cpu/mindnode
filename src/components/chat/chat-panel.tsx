@@ -135,6 +135,26 @@ export function ChatPanel({
     });
   }, [open, starter]);
 
+  // Escape closes the panel unless the user is typing in the composer.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   // Keep the conversation scrolled to the newest message.
   useEffect(() => {
     if (!open) return;

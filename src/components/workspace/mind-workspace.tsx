@@ -144,13 +144,38 @@ function BottomSheet({
   title: string;
   children: React.ReactNode;
 }) {
+  // Escape closes the sheet, except while the user is typing in a field
+  // (text inputs use Escape to cancel their own editing).
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      aria-hidden={!open}
       className={[
         "fixed bottom-0 left-0 right-0 z-40 flex flex-col",
         "rounded-t-2xl border-t border-canvas-border bg-canvas-surface",
         "transition-transform duration-300 ease-in-out",
-        open ? "translate-y-0" : "translate-y-full",
+        open ? "translate-y-0" : "translate-y-full pointer-events-none",
       ].join(" ")}
       style={{ maxHeight: "75vh" }}
     >
@@ -240,6 +265,14 @@ export function MindWorkspace({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
   const [uploadToast, setUploadToast] = useState<string | null>(null);
+
+  // Toasts auto-dismiss after a few seconds (manual close still works);
+  // errors linger a little longer than confirmations.
+  useEffect(() => {
+    if (!uploadToast) return;
+    const timer = setTimeout(() => setUploadToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [uploadToast]);
   const [ghosts, setGhosts] = useState<GhostSuggestion[]>([]);
   // ghostId -> real_node_id created when that ghost was pinned. Lets a
   // child ghost (whose parent has already been pinned) connect to the
@@ -249,6 +282,11 @@ export function MindWorkspace({
   const pinningGhostIdRef = useRef<Set<string>>(new Set());
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!aiError) return;
+    const timer = setTimeout(() => setAiError(null), 7000);
+    return () => clearTimeout(timer);
+  }, [aiError]);
   const [hideGhosts, setHideGhosts] = useState(false);
   const [activeRootNodeId, setActiveRootNodeId] = useState<string | null>(null);
   const [activeGhostPathIds, setActiveGhostPathIds] = useState<string[]>([]);
@@ -359,7 +397,6 @@ export function MindWorkspace({
         ? "Updated the existing thought."
         : "Added to your canvas.",
     );
-    setTimeout(() => setUploadToast(null), 4000);
   }, [captureReview, applyGraphDelta]);
 
   const handleSuggestionDismiss = useCallback(() => {
@@ -396,7 +433,6 @@ export function MindWorkspace({
       setCaptureReview(null);
       setActiveSheet(null);
       setUploadToast("Added to your canvas.");
-      setTimeout(() => setUploadToast(null), 4000);
     } finally {
       setAddAsIsPending(false);
     }
@@ -753,7 +789,6 @@ export function MindWorkspace({
           ? "Graph is already tidy."
           : `Tidied ${result.moved} node${result.moved === 1 ? "" : "s"}.`,
       );
-      setTimeout(() => setUploadToast(null), 4000);
     } catch (err) {
       setAiError(err instanceof Error ? err.message : "Could not tidy the graph.");
     } finally {
@@ -1034,6 +1069,7 @@ export function MindWorkspace({
               type="button"
               onClick={() => openSheet("insights")}
               aria-label={`Insights: ${insightCount}`}
+              title={`Insights (${insightCount})`}
               className="flex h-7 items-center gap-1 rounded-full border border-teal-400/40 bg-teal-950/30 px-2 text-[11px] font-medium text-teal-200 hover:bg-teal-950/50"
             >
               <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
@@ -1049,7 +1085,8 @@ export function MindWorkspace({
           <button
             type="button"
             onClick={() => openSheet("search")}
-            aria-label="Search thoughts"
+            aria-label="Search thoughts, nodes, and documents"
+            title="Search"
             className="flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
           >
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
@@ -1063,6 +1100,7 @@ export function MindWorkspace({
             type="button"
             onClick={() => openSheet("documents")}
             aria-label="Documents"
+            title="Documents"
             className="relative flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
           >
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
@@ -1411,7 +1449,6 @@ export function MindWorkspace({
             setUploadToast(detail ? `${base}: ${detail}` : base);
             setActiveSheet("documents");
             router.refresh();
-            setTimeout(() => setUploadToast(null), 6000);
           }}
         />
       </BottomSheet>
