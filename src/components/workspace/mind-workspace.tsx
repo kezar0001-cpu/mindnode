@@ -172,17 +172,22 @@ function BottomSheet({
       aria-label={title}
       aria-hidden={!open}
       className={[
-        "fixed bottom-0 left-0 right-0 z-40 flex flex-col",
-        "rounded-t-2xl border-t border-canvas-border bg-canvas-surface",
+        "fixed z-40 flex flex-col bg-canvas-surface",
         "transition-transform duration-300 ease-in-out",
-        open ? "translate-y-0" : "translate-y-full pointer-events-none",
+        // Mobile: bottom sheet. Desktop (lg+): right-docked side panel that
+        // leaves the canvas usable to its left.
+        "bottom-0 left-0 right-0 max-h-[75vh] rounded-t-2xl border-t border-canvas-border",
+        "lg:left-auto lg:right-0 lg:top-0 lg:bottom-0 lg:w-[420px] lg:max-h-none",
+        "lg:rounded-t-none lg:rounded-l-2xl lg:border-t-0 lg:border-l lg:shadow-2xl lg:shadow-black/40",
+        open
+          ? "translate-y-0 lg:translate-x-0"
+          : "translate-y-full pointer-events-none lg:translate-y-0 lg:translate-x-full",
       ].join(" ")}
-      style={{ maxHeight: "75vh" }}
     >
-      <div className="flex shrink-0 items-center justify-between px-5 pb-3 pt-4">
+      <div className="flex shrink-0 items-center justify-between px-5 pb-3 pt-4 lg:hidden">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-700" />
       </div>
-      <div className="flex shrink-0 items-center justify-between px-5 pb-3">
+      <div className="flex shrink-0 items-center justify-between px-5 pb-3 lg:pt-4">
         <p className="text-sm font-semibold text-neutral-200">{title}</p>
         <button
           type="button"
@@ -1303,7 +1308,9 @@ export function MindWorkspace({
       <div
         onClick={closeSheet}
         className={[
-          "fixed inset-0 z-30 bg-black/50",
+          // Dim backdrop on mobile only; on desktop the docked panel sits
+          // beside a fully interactive canvas, so no backdrop.
+          "fixed inset-0 z-30 bg-black/50 lg:hidden",
           "transition-opacity duration-300",
           sheetOpen ? "opacity-100" : "opacity-0 pointer-events-none",
         ].join(" ")}

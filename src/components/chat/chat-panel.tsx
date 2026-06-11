@@ -300,18 +300,20 @@ export function ChatPanel({
     <>
       <div
         onClick={onClose}
-        className="fixed inset-0 z-40 bg-black/50 transition-opacity duration-300"
+        className="fixed inset-0 z-40 bg-black/50 transition-opacity duration-300 lg:hidden"
       />
       <div
         className={[
-          "fixed bottom-0 left-0 right-0 z-50 flex flex-col",
-          "rounded-t-2xl border-t border-canvas-border bg-canvas-surface",
+          "fixed z-50 flex flex-col bg-canvas-surface",
+          // Mobile: bottom sheet (82vh). Desktop (lg+): right-docked panel.
+          "bottom-0 left-0 right-0 h-[82vh] rounded-t-2xl border-t border-canvas-border",
+          "lg:left-auto lg:right-0 lg:top-0 lg:bottom-0 lg:h-auto lg:w-[420px]",
+          "lg:rounded-t-none lg:rounded-l-2xl lg:border-t-0 lg:border-l lg:shadow-2xl lg:shadow-black/40",
         ].join(" ")}
-        style={{ height: "82vh", maxHeight: "82vh" }}
       >
         {/* Grab handle + header */}
         <div className="shrink-0 px-5 pt-3">
-          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-700" />
+          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-700 lg:hidden" />
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <p className="text-sm font-semibold text-neutral-200">Companion</p>
