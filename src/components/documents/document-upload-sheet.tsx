@@ -66,6 +66,26 @@ const STAGE_LABEL: Record<
   graph: "Building graph…",
 };
 
+// Maps the document's real DB status to the sheet's working stage. Terminal
+// statuses are handled by the upload POST response, not the poller.
+function stageForStatus(
+  status: string | null,
+): Exclude<UploadStage, "idle" | "done" | "error"> | null {
+  switch (status) {
+    case null:
+    case "uploaded":
+      return "uploading";
+    case "extracting":
+      return "extracting";
+    case "extracted":
+      return "reading";
+    case "processing":
+      return "graph";
+    default:
+      return null;
+  }
+}
+
 export function DocumentUploadSheet({
   onSuccess,
 }: {
@@ -86,36 +106,42 @@ export function DocumentUploadSheet({
 }) {
   const [state, setState] = useState<UploadState>({ status: "idle" });
   const inputRef = useRef<HTMLInputElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isWorking = state.status === "working";
 
+  // Stop polling if the component unmounts mid-upload.
   useEffect(() => {
-    if (state.status !== "working") return;
-    const stages: Exclude<UploadStage, "idle" | "done" | "error">[] = [
-      "uploading",
-      "extracting",
-      "reading",
-      "graph",
-    ];
-    const delays = [1500, 2500, 3000];
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    let idx = stages.indexOf(state.stage);
-    let totalDelay = 0;
-    for (let i = idx; i < stages.length - 1; i++) {
-      totalDelay += delays[i];
-      const next = stages[i + 1];
-      timers.push(
-        setTimeout(() => {
-          setState((s) =>
-            s.status === "working" ? { status: "working", stage: next } : s,
-          );
-        }, totalDelay),
-      );
-    }
     return () => {
-      for (const t of timers) clearTimeout(t);
+      if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [state]);
+  }, []);
+
+  function startPolling(token: string) {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(
+          `/api/documents/status?token=${encodeURIComponent(token)}`,
+        );
+        const json = await res.json();
+        if (!json.ok) return;
+        const stage = stageForStatus(json.status ?? null);
+        if (stage) {
+          setState((s) => (s.status === "working" ? { status: "working", stage } : s));
+        }
+      } catch {
+        // Transient — keep polling; the POST result is authoritative.
+      }
+    }, 1200);
+  }
+
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
 
   async function handleUpload(file: File) {
     if (file.size > MAX_BYTES) {
@@ -128,8 +154,16 @@ export function DocumentUploadSheet({
 
     setState({ status: "working", stage: "uploading" });
 
+    const token =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("upload_token", token);
+
+    startPolling(token);
 
     let response: Response;
     try {
@@ -138,22 +172,20 @@ export function DocumentUploadSheet({
         body: formData,
       });
     } catch (error) {
+      stopPolling();
       console.error("[documents/upload] fetch failed", error);
       setState({
         status: "error",
         message: "Network error. Please try again.",
       });
       return;
+    } finally {
+      stopPolling();
     }
-
-    const contentType = response.headers.get("content-type") ?? "";
-    console.info("[documents/upload] response.status", response.status);
-    console.info("[documents/upload] response.headers content-type", contentType);
 
     let rawText = "";
     try {
       rawText = await response.text();
-      console.info("[documents/upload] raw response text", rawText);
     } catch (error) {
       console.error("[documents/upload] failed to read response text", error);
       setState({
@@ -166,7 +198,6 @@ export function DocumentUploadSheet({
     let body: UploadResponse;
     try {
       body = JSON.parse(rawText) as UploadResponse;
-      console.info("[documents/upload] parsed payload", body);
     } catch (error) {
       console.error("[documents/upload] response was not valid JSON", error);
       const preview = rawText.slice(0, 300) || "<empty response>";

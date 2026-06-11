@@ -150,6 +150,13 @@ export async function POST(req: Request) {
     if (!(file instanceof File)) {
       return fail("No file uploaded.");
     }
+    // Optional client-generated token so the upload sheet can poll real
+    // processing status (GET /api/documents/status) while this runs.
+    const uploadTokenRaw = formData.get("upload_token");
+    const uploadToken =
+      typeof uploadTokenRaw === "string" && uploadTokenRaw.trim()
+        ? uploadTokenRaw.trim().slice(0, 64)
+        : null;
     if (file.size === 0) {
       return fail("File is empty.");
     }
@@ -191,6 +198,7 @@ export async function POST(req: Request) {
         file_size_bytes: file.size,
         storage_path: "",
         status: "uploaded",
+        metadata: uploadToken ? { upload_token: uploadToken } : {},
       })
       .select("id")
       .single();
@@ -253,6 +261,9 @@ export async function POST(req: Request) {
       metadata: extraction.metadata,
     });
     const safeMetadata = JSON.parse(JSON.stringify(extraction.metadata));
+    // Preserve the upload token across the metadata overwrite so status
+    // polling keeps resolving this row.
+    if (uploadToken) safeMetadata.upload_token = uploadToken;
     await supabase
       .from("source_documents")
       .update({
