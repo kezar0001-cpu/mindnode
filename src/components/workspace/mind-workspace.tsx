@@ -1,10 +1,31 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import dynamic from "next/dynamic";
 
 import { Canvas, type GhostSuggestion } from "@/components/canvas/Canvas";
+import type { PreviewNode } from "@/components/canvas/graph-3d";
+
+// The 3D canvas touches WebGL/`window`, so it must be browser-only.
+// Loaded behind the NEXT_PUBLIC_USE_3D flag during the 3D migration.
+const Graph3D = dynamic(
+  () => import("@/components/canvas/graph-3d").then((m) => m.Graph3D),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full w-full items-center justify-center text-sm text-neutral-500">
+        Loading space…
+      </div>
+    ),
+  },
+);
+
+// 3D neural-network canvas is the default surface. Set NEXT_PUBLIC_USE_3D=0
+// to fall back to the legacy 2D React Flow canvas.
+const USE_3D = process.env.NEXT_PUBLIC_USE_3D !== "0";
 import { NodeDetail } from "@/components/nodes/node-detail";
 import { ThoughtInputForm } from "@/components/input/thought-input-form";
+import { QuickCapture } from "@/components/input/quick-capture";
 import { RecentThoughtsList } from "@/components/input/recent-thoughts-list";
 import {
   SuggestionReview,
@@ -62,6 +83,7 @@ type ActiveSheet =
   | "documents"
   | "upload"
   | "suggestion"
+  | "more"
   | null;
 
 type ApiSuggestion = {
@@ -352,7 +374,9 @@ export function MindWorkspace({
 
   const requestSuggestion = useCallback(async (memoryId: string) => {
     setCaptureReview({ phase: "loading", memoryId });
-    setActiveSheet("suggestion");
+    // In 3D, the proposal is reviewed as a glowing preview node on the canvas
+    // (one-tap confirm), not in a sheet. In 2D, open the review sheet.
+    if (!USE_3D) setActiveSheet("suggestion");
     try {
       const res = await fetch("/api/suggest", {
         method: "POST",
@@ -442,6 +466,20 @@ export function MindWorkspace({
       setAddAsIsPending(false);
     }
   }, [captureReview, applyGraphDelta]);
+
+  // The glowing one-tap preview node, derived from a ready suggestion (3D only).
+  const previewNode = useMemo<PreviewNode | null>(() => {
+    if (!USE_3D || captureReview?.phase !== "ready") return null;
+    const { suggestion, target_node, edge_targets } = captureReview.data;
+    return {
+      title: suggestion.title,
+      category: suggestion.category,
+      linkTargetIds: [
+        ...(target_node ? [target_node.id] : []),
+        ...edge_targets.map((t) => t.id),
+      ],
+    };
+  }, [captureReview]);
 
   // Insights derived from the in-memory graph.
   const insights = useMemo(
@@ -1002,21 +1040,33 @@ export function MindWorkspace({
   return (
     <div className="fixed inset-0 overflow-hidden">
       <div className="absolute inset-0 z-0">
-        <Canvas
-          dbNodes={visibleNodes}
-          dbEdges={visibleEdges}
-          selectedNodeId={selectedNodeId}
-          onNodeSelect={handleNodeSelect}
-          collapsedCounts={collapsedCounts}
-          ghostSuggestions={visibleGhosts}
-          activeRootNodeId={activeRootNodeId}
-          activeGhostPathIds={activeGhostPathIds}
-          selectedGhostId={selectedGhostId}
-          onGhostSelect={handleGhostSelect}
-          onGhostExplore={handleGhostExplore}
-          onGhostPin={handleGhostPin}
-          onGhostDismiss={handleGhostDismiss}
-        />
+        {USE_3D ? (
+          <Graph3D
+            nodes={visibleNodes}
+            edges={visibleEdges}
+            selectedNodeId={selectedNodeId}
+            onNodeSelect={handleNodeSelect}
+            preview={previewNode}
+            onPreviewConfirm={handleSuggestionAccept}
+            onPreviewDismiss={handleSuggestionDismiss}
+          />
+        ) : (
+          <Canvas
+            dbNodes={visibleNodes}
+            dbEdges={visibleEdges}
+            selectedNodeId={selectedNodeId}
+            onNodeSelect={handleNodeSelect}
+            collapsedCounts={collapsedCounts}
+            ghostSuggestions={visibleGhosts}
+            activeRootNodeId={activeRootNodeId}
+            activeGhostPathIds={activeGhostPathIds}
+            selectedGhostId={selectedGhostId}
+            onGhostSelect={handleGhostSelect}
+            onGhostExplore={handleGhostExplore}
+            onGhostPin={handleGhostPin}
+            onGhostDismiss={handleGhostDismiss}
+          />
+        )}
       </div>
 
       <header
@@ -1049,6 +1099,8 @@ export function MindWorkspace({
             </svg>
           </button>
 
+          {!USE_3D ? (
+          <>
           {/* AI / Suggest — sparkle icon */}
           <button
             type="button"
@@ -1148,6 +1200,28 @@ export function MindWorkspace({
               </span>
             )}
           </button>
+          </>
+          ) : (
+            /* 3D shell: everything secondary lives behind one menu. */
+            <button
+              type="button"
+              onClick={() => openSheet("more")}
+              aria-label="More — search, documents, thoughts, insights"
+              title="More"
+              className="relative flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <circle cx="3" cy="7" r="1.1" fill="currentColor" />
+                <circle cx="7" cy="7" r="1.1" fill="currentColor" />
+                <circle cx="11" cy="7" r="1.1" fill="currentColor" />
+              </svg>
+              {(unpromotedCount > 0 || insightCount > 0) && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-teal-600 text-[8px] font-bold leading-none text-white">
+                  {Math.min(unpromotedCount + insightCount, 9)}
+                </span>
+              )}
+            </button>
+          )}
 
           {/* Avatar / sign out */}
           <form action={signOutAction}>
@@ -1176,7 +1250,9 @@ export function MindWorkspace({
         </div>
       )}
 
-      {/* Graph control tray — bottom-left glass pill, above safe area */}
+      {/* Graph control tray — bottom-left glass pill, above safe area.
+          2D only: in 3D the force simulation + camera replace these. */}
+      {!USE_3D && (
       <div
         className="fixed left-4 z-20 flex items-center gap-0.5 rounded-full border border-canvas-border bg-canvas-surface/90 px-1.5 py-1.5 shadow-md backdrop-blur-sm"
         style={{ bottom: "max(24px, calc(env(safe-area-inset-bottom) + 8px))" }}
@@ -1281,29 +1357,58 @@ export function MindWorkspace({
           </>
         )}
       </div>
+      )}
 
-      <button
-        type="button"
-        onClick={() => openSheet("composer")}
-        aria-label="Add thought"
-        className={[
-          "fixed right-5 z-20",
-          "flex h-14 w-14 items-center justify-center",
-          "rounded-full bg-neutral-100 shadow-lg shadow-black/50",
-          "text-canvas-bg transition-all duration-200",
-          sheetOpen ? "scale-0 opacity-0 pointer-events-none" : "scale-100 opacity-100",
-        ].join(" ")}
-        style={{ bottom: "max(24px, calc(env(safe-area-inset-bottom) + 8px))" }}
-      >
-        <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-          <path
-            d="M11 4v14M4 11h14"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
+      {USE_3D ? (
+        <div
+          className="fixed inset-x-0 z-20 mx-auto w-[min(560px,calc(100%-2rem))] px-2"
+          style={{ bottom: "max(20px, calc(env(safe-area-inset-bottom) + 8px))" }}
+        >
+          {previewNode && (
+            <div className="mb-2 rounded-xl border border-sky-400/40 bg-canvas-surface/90 px-4 py-3 text-sm shadow-lg shadow-black/40 backdrop-blur-md">
+              <p className="text-neutral-200">
+                Tap the glowing{" "}
+                <span className="font-medium text-sky-300">
+                  {previewNode.title}
+                </span>{" "}
+                to keep it · tap empty space to discard.
+              </p>
+              {captureReview?.phase === "ready" && (
+                <p className="mt-1 text-xs text-neutral-400">
+                  {captureReview.data.suggestion.explanation}
+                </p>
+              )}
+            </div>
+          )}
+          <QuickCapture
+            onSuccess={requestSuggestion}
+            busy={captureReview?.phase === "loading"}
           />
-        </svg>
-      </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => openSheet("composer")}
+          aria-label="Add thought"
+          className={[
+            "fixed right-5 z-20",
+            "flex h-14 w-14 items-center justify-center",
+            "rounded-full bg-neutral-100 shadow-lg shadow-black/50",
+            "text-canvas-bg transition-all duration-200",
+            sheetOpen ? "scale-0 opacity-0 pointer-events-none" : "scale-100 opacity-100",
+          ].join(" ")}
+          style={{ bottom: "max(24px, calc(env(safe-area-inset-bottom) + 8px))" }}
+        >
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <path
+              d="M11 4v14M4 11h14"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      )}
 
       <div
         onClick={closeSheet}
@@ -1339,6 +1444,42 @@ export function MindWorkspace({
             addAsIsPending={addAsIsPending}
           />
         )}
+      </BottomSheet>
+
+      <BottomSheet
+        open={activeSheet === "more"}
+        onClose={closeSheet}
+        title="More"
+      >
+        <div className="flex flex-col gap-1">
+          {[
+            { key: "search" as const, label: "Search", hint: "Find thoughts, nodes, documents" },
+            { key: "thoughts" as const, label: "Recent thoughts", hint: `${unpromotedCount} not yet on the canvas`, badge: unpromotedCount },
+            { key: "documents" as const, label: "Documents", hint: `${sourceDocuments.length} uploaded`, badge: sourceDocuments.length },
+            ...(insightCount > 0
+              ? [{ key: "insights" as const, label: "Insights", hint: `${insightCount} suggestion${insightCount === 1 ? "" : "s"}`, badge: insightCount }]
+              : []),
+          ].map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => openSheet(item.key)}
+              className="flex items-center justify-between rounded-lg border border-canvas-border bg-canvas-bg px-4 py-3 text-left transition-colors hover:border-neutral-500"
+            >
+              <span>
+                <span className="block text-sm font-medium text-neutral-100">
+                  {item.label}
+                </span>
+                <span className="block text-xs text-neutral-500">{item.hint}</span>
+              </span>
+              {"badge" in item && item.badge ? (
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-teal-600 px-1.5 text-xs font-semibold text-white">
+                  {item.badge}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
       </BottomSheet>
 
       <BottomSheet
