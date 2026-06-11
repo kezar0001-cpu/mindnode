@@ -1,8 +1,25 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import dynamic from "next/dynamic";
 
 import { Canvas, type GhostSuggestion } from "@/components/canvas/Canvas";
+
+// The 3D canvas touches WebGL/`window`, so it must be browser-only.
+// Loaded behind the NEXT_PUBLIC_USE_3D flag during the 3D migration.
+const Graph3D = dynamic(
+  () => import("@/components/canvas/graph-3d").then((m) => m.Graph3D),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full w-full items-center justify-center text-sm text-neutral-500">
+        Loading space…
+      </div>
+    ),
+  },
+);
+
+const USE_3D = process.env.NEXT_PUBLIC_USE_3D === "1";
 import { NodeDetail } from "@/components/nodes/node-detail";
 import { ThoughtInputForm } from "@/components/input/thought-input-form";
 import { RecentThoughtsList } from "@/components/input/recent-thoughts-list";
@@ -1002,21 +1019,30 @@ export function MindWorkspace({
   return (
     <div className="fixed inset-0 overflow-hidden">
       <div className="absolute inset-0 z-0">
-        <Canvas
-          dbNodes={visibleNodes}
-          dbEdges={visibleEdges}
-          selectedNodeId={selectedNodeId}
-          onNodeSelect={handleNodeSelect}
-          collapsedCounts={collapsedCounts}
-          ghostSuggestions={visibleGhosts}
-          activeRootNodeId={activeRootNodeId}
-          activeGhostPathIds={activeGhostPathIds}
-          selectedGhostId={selectedGhostId}
-          onGhostSelect={handleGhostSelect}
-          onGhostExplore={handleGhostExplore}
-          onGhostPin={handleGhostPin}
-          onGhostDismiss={handleGhostDismiss}
-        />
+        {USE_3D ? (
+          <Graph3D
+            nodes={visibleNodes}
+            edges={visibleEdges}
+            selectedNodeId={selectedNodeId}
+            onNodeSelect={handleNodeSelect}
+          />
+        ) : (
+          <Canvas
+            dbNodes={visibleNodes}
+            dbEdges={visibleEdges}
+            selectedNodeId={selectedNodeId}
+            onNodeSelect={handleNodeSelect}
+            collapsedCounts={collapsedCounts}
+            ghostSuggestions={visibleGhosts}
+            activeRootNodeId={activeRootNodeId}
+            activeGhostPathIds={activeGhostPathIds}
+            selectedGhostId={selectedGhostId}
+            onGhostSelect={handleGhostSelect}
+            onGhostExplore={handleGhostExplore}
+            onGhostPin={handleGhostPin}
+            onGhostDismiss={handleGhostDismiss}
+          />
+        )}
       </div>
 
       <header
