@@ -19,13 +19,21 @@ Executed on this branch:
   `router.refresh()` calls removed; canvas now honours server-side moves
   (fixes Tidy never visually moving nodes).
 - **6.7** — Timeouts + bounded retry/backoff on all AI/embedding calls.
+- **6.9** — Real upload progress: client sends an `upload_token`, polls
+  `/api/documents/status` for the document's true status; fake stage cycler
+  removed.
+- **6.11** — Node detail, chat, and sheets dock to a right-side panel on `lg+`
+  while staying bottom sheets on mobile.
+- **6.12** — Vitest suite (view-model, declutter, tokenizers, chunker,
+  capture-suggestion schema + sanitizer) and a GitHub Actions CI workflow
+  (lint + typecheck + test + build).
 - **6.10 (partial)** — Auto-dismissing toasts, Escape-to-close + dialog
   semantics on sheets/chat, header tooltips, ghost button disabled fix.
   Remaining: focus trap, accessible names on canvas nodes.
 
 Still open: **6.8** (transactions — needs a migration applied to the live
-project), **6.9** (real upload progress), **6.11** (desktop docked panels),
-**6.12** (test suite + CI), and the P2 items.
+project, deferred pending approval), the remainder of **6.10**, and the P2
+items (undo, insights explainers, canvas legend, streaming chat).
 
 Date: 2026-06-10
 Scope reviewed: backend (API routes, AI pipeline, data layer, Supabase schema/RLS),
