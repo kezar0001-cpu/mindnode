@@ -268,7 +268,8 @@ export async function POST(req: Request) {
         { status: 502 },
       );
     }
-    const { answer, citations, proposed_graph_changes } = result.response;
+    const { answer, citations, proposed_graph_changes, follow_up_topics } =
+      result.response;
     const resolvedCitations = resolveCitations(citations, context);
 
     const usedNodes = [
@@ -353,6 +354,7 @@ export async function POST(req: Request) {
       used_nodes: usedNodes,
       used_sources: usedSources,
       retrieval_mode: context.retrievalMode,
+      follow_up_topics: follow_up_topics ?? [],
       proposed_graph_changes: hasChanges
         ? { ...proposed_graph_changes, suggestion_id: suggestionId }
         : undefined,

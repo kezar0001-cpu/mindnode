@@ -1423,12 +1423,12 @@ export function MindWorkspace({
             <ThoughtCard
               node={selectedNode}
               neighbours={selectedNeighbours}
-              memoryCount={memoryTrails[selectedNode.id]?.length ?? 0}
+              trail={memoryTrails[selectedNode.id] ?? []}
               onHop={handleNodeSelect}
               onAskAI={() =>
                 openChat({ id: selectedNode.id, title: selectedNode.title })
               }
-              onDetails={() => setActiveSheet("detail")}
+              onEdit={() => setActiveSheet("detail")}
               onClose={() => handleNodeSelect(null)}
             />
           ) : (
