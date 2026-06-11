@@ -45,6 +45,10 @@ const PREVIEW_ID = "__preview__";
 // neighbours, and hubs — so the scene stays calm when the graph is dense.
 const LABEL_DENSITY_THRESHOLD = 40;
 const HUB_LABEL_MIN_VAL = 3;
+// When a node is selected, everything outside its neighbourhood recedes so
+// the lit neighbours read as the walkable paths.
+const DIM_NODE_COLOR = "#2c313c";
+const DIM_LINK_COLOR = "rgba(148,163,184,0.08)";
 
 // The AI's proposed placement for a just-captured thought, rendered as a
 // glowing candidate node. One tap on it keeps it (onPreviewConfirm); a tap
@@ -195,13 +199,14 @@ export function Graph3D({
 
   const dense = nodes.length > LABEL_DENSITY_THRESHOLD;
 
-  // Fly the camera to the selected node.
+  // Fly the camera to the selected node — close enough to feel like
+  // stepping into its neighbourhood, with the lit neighbours in view.
   useEffect(() => {
     if (!selectedNodeId) return;
     const fg = fgRef.current;
     const node = nodeCache.current.get(selectedNodeId);
     if (!fg || !node || node.x === undefined) return;
-    const distance = 140;
+    const distance = 110;
     const hypot = Math.hypot(node.x, node.y ?? 0, node.z ?? 0) || 1;
     const ratio = 1 + distance / hypot;
     fg.cameraPosition(
@@ -214,9 +219,12 @@ export function Graph3D({
   const nodeColor = useCallback(
     (node: FGNode) => {
       if (node.id === PREVIEW_ID) return PREVIEW_COLOR;
-      return node.id === selectedNodeId ? SELECTED_COLOR : node.color;
+      if (!selectedNodeId) return node.color;
+      if (node.id === selectedNodeId) return SELECTED_COLOR;
+      // Neighbours stay lit (the walkable paths); the rest recedes.
+      return neighborIds.has(node.id) ? node.color : DIM_NODE_COLOR;
     },
-    [selectedNodeId],
+    [selectedNodeId, neighborIds],
   );
 
   const nodeVal = useCallback(
@@ -239,13 +247,13 @@ export function Graph3D({
         return sprite;
       }
       const isSelected = node.id === selectedNodeId;
-      if (
-        dense &&
-        !isSelected &&
-        !neighborIds.has(node.id) &&
-        (node.val ?? 1) < HUB_LABEL_MIN_VAL
-      ) {
-        // Empty object = default sphere only (no label) under nodeThreeObjectExtend.
+      // With a selection, only the focused neighbourhood is labelled — the
+      // lit, labelled neighbours are the paths you can walk next. Without
+      // one, dense graphs label hubs only. Empty object = sphere without a
+      // label under nodeThreeObjectExtend.
+      if (selectedNodeId) {
+        if (!isSelected && !neighborIds.has(node.id)) return new Object3D();
+      } else if (dense && (node.val ?? 1) < HUB_LABEL_MIN_VAL) {
         return new Object3D();
       }
       const sprite = new SpriteText(node.label);
@@ -259,15 +267,16 @@ export function Graph3D({
 
   const linkColor = useCallback(
     (link: { source: string | { id: string }; target: string | { id: string } }) => {
-      if (
-        linkNodeId(link.source) === PREVIEW_ID ||
-        linkNodeId(link.target) === PREVIEW_ID
-      ) {
-        return "rgba(125,211,252,0.7)";
+      const s = linkNodeId(link.source);
+      const t = linkNodeId(link.target);
+      if (s === PREVIEW_ID || t === PREVIEW_ID) return "rgba(125,211,252,0.7)";
+      if (!selectedNodeId) return "rgba(148,163,184,0.35)";
+      if (s === selectedNodeId || t === selectedNodeId) {
+        return "rgba(94,234,212,0.55)";
       }
-      return "rgba(148,163,184,0.35)";
+      return DIM_LINK_COLOR;
     },
-    [],
+    [selectedNodeId],
   );
 
   const linkWidth = useCallback(
@@ -321,7 +330,11 @@ export function Graph3D({
   }, [preview, onPreviewDismiss, onNodeSelect]);
 
   return (
-    <div ref={containerRef} className="h-full w-full" style={{ touchAction: "none" }}>
+    <div
+      ref={containerRef}
+      className="relative h-full w-full"
+      style={{ touchAction: "none" }}
+    >
       {size.width > 0 && (
         <ForceGraph3D
           ref={fgRef}
@@ -349,6 +362,25 @@ export function Graph3D({
           cooldownTicks={120}
           warmupTicks={20}
         />
+      )}
+      {nodes.length > 0 && (
+        <button
+          type="button"
+          onClick={() => fgRef.current?.zoomToFit(800, 80)}
+          aria-label="Overview — see the whole network"
+          title="Overview"
+          className="absolute right-4 top-16 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface/90 text-neutral-400 shadow-md backdrop-blur-sm transition-colors hover:text-neutral-100"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path
+              d="M5 1H1v4M9 1h4v4M5 13H1V9M9 13h4V9"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
       )}
       {nodes.length === 0 && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">

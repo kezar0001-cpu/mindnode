@@ -24,6 +24,7 @@ const Graph3D = dynamic(
 // to fall back to the legacy 2D React Flow canvas.
 const USE_3D = process.env.NEXT_PUBLIC_USE_3D !== "0";
 import { NodeDetail } from "@/components/nodes/node-detail";
+import { ThoughtCard, type NeighbourChip } from "@/components/nodes/thought-card";
 import { ThoughtInputForm } from "@/components/input/thought-input-form";
 import { QuickCapture } from "@/components/input/quick-capture";
 import { RecentThoughtsList } from "@/components/input/recent-thoughts-list";
@@ -481,6 +482,34 @@ export function MindWorkspace({
     };
   }, [captureReview]);
 
+  // The selected node and its direct neighbours, for the compact ThoughtCard
+  // (3D only) — the chips are the paths the user can walk next.
+  const selectedNode = useMemo<GraphNode | null>(
+    () => graphNodes.find((n) => n.id === selectedNodeId) ?? null,
+    [graphNodes, selectedNodeId],
+  );
+
+  const selectedNeighbours = useMemo<NeighbourChip[]>(() => {
+    if (!selectedNodeId) return [];
+    const byId = new Map(graphNodes.map((n) => [n.id, n]));
+    const seen = new Set<string>();
+    const out: NeighbourChip[] = [];
+    for (const e of graphEdges) {
+      const otherId =
+        e.source_node_id === selectedNodeId
+          ? e.target_node_id
+          : e.target_node_id === selectedNodeId
+            ? e.source_node_id
+            : null;
+      if (!otherId || seen.has(otherId)) continue;
+      const other = byId.get(otherId);
+      if (!other) continue;
+      seen.add(otherId);
+      out.push({ id: other.id, title: other.title, category: other.category });
+    }
+    return out;
+  }, [graphEdges, graphNodes, selectedNodeId]);
+
   // Insights derived from the in-memory graph.
   const insights = useMemo(
     () => deriveInsights(graphNodes, graphEdges),
@@ -566,7 +595,10 @@ export function MindWorkspace({
     setActiveGhostPathIds([]);
     setActiveRootNodeId(id);
     setExpandBranch(false);
-    if (id) {
+    // In 3D, selection stays in-scene: the camera dives in and the compact
+    // ThoughtCard appears, with the full detail sheet behind "Details".
+    // In 2D, selection opens the detail sheet as before.
+    if (id && !USE_3D) {
       setActiveSheet("detail");
     } else {
       setActiveSheet(null);
@@ -1364,26 +1396,47 @@ export function MindWorkspace({
           className="fixed inset-x-0 z-20 mx-auto w-[min(560px,calc(100%-2rem))] px-2"
           style={{ bottom: "max(20px, calc(env(safe-area-inset-bottom) + 8px))" }}
         >
-          {previewNode && (
-            <div className="mb-2 rounded-xl border border-sky-400/40 bg-canvas-surface/90 px-4 py-3 text-sm shadow-lg shadow-black/40 backdrop-blur-md">
-              <p className="text-neutral-200">
-                Tap the glowing{" "}
-                <span className="font-medium text-sky-300">
-                  {previewNode.title}
-                </span>{" "}
-                to keep it · tap empty space to discard.
-              </p>
-              {captureReview?.phase === "ready" && (
-                <p className="mt-1 text-xs text-neutral-400">
-                  {captureReview.data.suggestion.explanation}
+          {/* One calm surface at a time: the capture preview, the selected
+              thought's card, or the composer. */}
+          {previewNode ? (
+            <>
+              <div className="mb-2 rounded-xl border border-sky-400/40 bg-canvas-surface/90 px-4 py-3 text-sm shadow-lg shadow-black/40 backdrop-blur-md">
+                <p className="text-neutral-200">
+                  Tap the glowing{" "}
+                  <span className="font-medium text-sky-300">
+                    {previewNode.title}
+                  </span>{" "}
+                  to keep it · tap empty space to discard.
                 </p>
-              )}
-            </div>
+                {captureReview?.phase === "ready" && (
+                  <p className="mt-1 text-xs text-neutral-400">
+                    {captureReview.data.suggestion.explanation}
+                  </p>
+                )}
+              </div>
+              <QuickCapture
+                onSuccess={requestSuggestion}
+                busy={captureReview?.phase === "loading"}
+              />
+            </>
+          ) : selectedNode && !sheetOpen ? (
+            <ThoughtCard
+              node={selectedNode}
+              neighbours={selectedNeighbours}
+              memoryCount={memoryTrails[selectedNode.id]?.length ?? 0}
+              onHop={handleNodeSelect}
+              onAskAI={() =>
+                openChat({ id: selectedNode.id, title: selectedNode.title })
+              }
+              onDetails={() => setActiveSheet("detail")}
+              onClose={() => handleNodeSelect(null)}
+            />
+          ) : (
+            <QuickCapture
+              onSuccess={requestSuggestion}
+              busy={captureReview?.phase === "loading"}
+            />
           )}
-          <QuickCapture
-            onSuccess={requestSuggestion}
-            busy={captureReview?.phase === "loading"}
-          />
         </div>
       ) : (
         <button
@@ -1496,7 +1549,12 @@ export function MindWorkspace({
 
       <BottomSheet
         open={activeSheet === "detail"}
-        onClose={closeSheet}
+        onClose={() => {
+          // In 3D, closing the detail sheet returns to the in-scene
+          // ThoughtCard rather than dropping the selection.
+          if (USE_3D) setActiveSheet(null);
+          else closeSheet();
+        }}
         title="Node detail"
       >
         <NodeDetail
