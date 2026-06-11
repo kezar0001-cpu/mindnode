@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph3D, { type ForceGraphMethods } from "react-force-graph-3d";
 import SpriteText from "three-spritetext";
+import { Object3D } from "three";
 import { categoryColour } from "@/lib/graph/insights";
 import type { GraphNode, GraphEdge } from "@/types";
 
@@ -40,6 +41,10 @@ const SELECTED_COLOR = "#5eead4";
 const PREVIEW_COLOR = "#7dd3fc";
 const BACKGROUND_COLOR = "#0f1115";
 const PREVIEW_ID = "__preview__";
+// Above this many nodes, labels are shown only for the selected node, its
+// neighbours, and hubs — so the scene stays calm when the graph is dense.
+const LABEL_DENSITY_THRESHOLD = 40;
+const HUB_LABEL_MIN_VAL = 3;
 
 // The AI's proposed placement for a just-captured thought, rendered as a
 // glowing candidate node. One tap on it keeps it (onPreviewConfirm); a tap
@@ -176,6 +181,20 @@ export function Graph3D({
     return () => ro.disconnect();
   }, []);
 
+  // Direct neighbours of the selected node — used for label gating and the
+  // subtle particle "energy" flow along focused links.
+  const neighborIds = useMemo<Set<string>>(() => {
+    const s = new Set<string>();
+    if (!selectedNodeId) return s;
+    for (const e of edges) {
+      if (e.source_node_id === selectedNodeId) s.add(e.target_node_id);
+      if (e.target_node_id === selectedNodeId) s.add(e.source_node_id);
+    }
+    return s;
+  }, [edges, selectedNodeId]);
+
+  const dense = nodes.length > LABEL_DENSITY_THRESHOLD;
+
   // Fly the camera to the selected node.
   useEffect(() => {
     if (!selectedNodeId) return;
@@ -208,9 +227,10 @@ export function Graph3D({
     [selectedNodeId],
   );
 
-  // Always-visible calm label sprite, drawn above the default sphere.
+  // Calm label sprite drawn above the default sphere. On dense graphs only
+  // the focused neighbourhood and hubs get labels, so the scene stays legible.
   const nodeThreeObject = useCallback(
-    (node: FGNode) => {
+    (node: FGNode): Object3D => {
       if (node.id === PREVIEW_ID) {
         const sprite = new SpriteText(`✦ ${node.label}`);
         sprite.color = PREVIEW_COLOR;
@@ -218,14 +238,23 @@ export function Graph3D({
         sprite.position.set(0, (node.val ?? 1) + 7, 0);
         return sprite;
       }
+      const isSelected = node.id === selectedNodeId;
+      if (
+        dense &&
+        !isSelected &&
+        !neighborIds.has(node.id) &&
+        (node.val ?? 1) < HUB_LABEL_MIN_VAL
+      ) {
+        // Empty object = default sphere only (no label) under nodeThreeObjectExtend.
+        return new Object3D();
+      }
       const sprite = new SpriteText(node.label);
-      sprite.color =
-        node.id === selectedNodeId ? SELECTED_COLOR : "rgba(229,229,229,0.85)";
-      sprite.textHeight = node.id === selectedNodeId ? 5 : 3.5;
+      sprite.color = isSelected ? SELECTED_COLOR : "rgba(229,229,229,0.85)";
+      sprite.textHeight = isSelected ? 5 : 3.5;
       sprite.position.set(0, (node.val ?? 1) + 6, 0);
       return sprite;
     },
-    [selectedNodeId],
+    [selectedNodeId, dense, neighborIds],
   );
 
   const linkColor = useCallback(
@@ -247,6 +276,28 @@ export function Graph3D({
       linkNodeId(link.target) === PREVIEW_ID
         ? 1.4
         : 0.5,
+    [],
+  );
+
+  // Subtle travelling particles: along the proposed preview edges, and along
+  // the selected node's links — a gentle neural pulse on what's in focus.
+  const linkParticles = useCallback(
+    (link: { source: string | { id: string }; target: string | { id: string } }) => {
+      const s = linkNodeId(link.source);
+      const t = linkNodeId(link.target);
+      if (s === PREVIEW_ID || t === PREVIEW_ID) return 3;
+      if (selectedNodeId && (s === selectedNodeId || t === selectedNodeId)) return 2;
+      return 0;
+    },
+    [selectedNodeId],
+  );
+
+  const linkParticleColor = useCallback(
+    (link: { source: string | { id: string }; target: string | { id: string } }) =>
+      linkNodeId(link.source) === PREVIEW_ID ||
+      linkNodeId(link.target) === PREVIEW_ID
+        ? PREVIEW_COLOR
+        : SELECTED_COLOR,
     [],
   );
 
@@ -288,7 +339,10 @@ export function Graph3D({
           nodeThreeObjectExtend
           linkColor={linkColor}
           linkWidth={linkWidth}
-          linkDirectionalParticles={0}
+          linkDirectionalParticles={linkParticles}
+          linkDirectionalParticleColor={linkParticleColor}
+          linkDirectionalParticleWidth={1.6}
+          linkDirectionalParticleSpeed={0.006}
           linkLabel={(link: FGLink) => link.label}
           onNodeClick={handleNodeClick}
           onBackgroundClick={handleBackgroundClick}
