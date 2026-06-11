@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import { categoryColour } from "@/lib/graph/insights";
 import type { GraphNode } from "@/types";
 
@@ -9,31 +11,44 @@ export type NeighbourChip = {
   category: string;
 };
 
+export type TrailEntry = {
+  id: string;
+  content: string;
+  created_at: string;
+};
+
+const trailFormatter = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+});
+
 // Compact, mobile-first card for the selected thought on the 3D canvas.
-// This is the default reading surface: enough to read the thought and walk
-// to a connected one in a single tap, with the full editing UI (memory
-// trail, edges, rename, delete) kept behind "Details".
+// This is the default reading surface — everything the user needs to read a
+// thought, see what it came from, and walk to a connected one — without a
+// full-screen sheet that pulls them out of the 3D scene. The heavy editing
+// UI (rename, delete, edge management) stays behind a subtle "Edit" link.
 export function ThoughtCard({
   node,
   neighbours,
-  memoryCount,
+  trail,
   onHop,
   onAskAI,
-  onDetails,
+  onEdit,
   onClose,
 }: {
   node: GraphNode;
   neighbours: NeighbourChip[];
-  memoryCount: number;
+  trail: TrailEntry[];
   onHop: (id: string) => void;
   onAskAI: () => void;
-  onDetails: () => void;
+  onEdit: () => void;
   onClose: () => void;
 }) {
   const colour = categoryColour(node.category || "general");
+  const [showTrail, setShowTrail] = useState(false);
 
   return (
-    <div className="rounded-2xl border border-canvas-border/80 bg-canvas-surface/95 p-4 shadow-lg shadow-black/40 backdrop-blur-md">
+    <div className="max-h-[56vh] overflow-y-auto rounded-2xl border border-canvas-border/80 bg-canvas-surface/95 p-4 shadow-lg shadow-black/40 backdrop-blur-md">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <span
@@ -62,52 +77,97 @@ export function ThoughtCard({
         </button>
       </div>
 
-      <p className="mt-1.5 line-clamp-2 text-sm leading-snug text-neutral-400">
-        {node.summary}
-      </p>
-      <p className="mt-1 text-xs text-neutral-500">
-        {node.category}
-        {memoryCount > 0 &&
-          ` · ${memoryCount} memor${memoryCount === 1 ? "y" : "ies"}`}
+      <p className="mt-0.5 text-[11px] uppercase tracking-wide text-neutral-500">
+        {node.category || "general"}
       </p>
 
+      {node.summary ? (
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-neutral-300">
+          {node.summary}
+        </p>
+      ) : (
+        <p className="mt-2 text-sm italic text-neutral-500">
+          No summary yet — open the memory trail below to see the original
+          thoughts.
+        </p>
+      )}
+
       {neighbours.length > 0 && (
-        <div className="-mx-1 mt-3 flex gap-1.5 overflow-x-auto px-1 pb-1">
-          {neighbours.map((n) => {
-            const c = categoryColour(n.category || "general");
-            return (
-              <button
-                key={n.id}
-                type="button"
-                onClick={() => onHop(n.id)}
-                className="flex shrink-0 items-center gap-1.5 rounded-full border border-canvas-border bg-canvas-bg px-3 py-1.5 text-xs text-neutral-300 transition-colors hover:border-neutral-500 hover:text-neutral-100"
-              >
-                <span
-                  className="h-1.5 w-1.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: c.stroke }}
-                  aria-hidden="true"
-                />
-                <span className="max-w-[10rem] truncate">{n.title}</span>
-              </button>
-            );
-          })}
+        <div className="mt-3">
+          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+            Connected ({neighbours.length})
+          </p>
+          <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+            {neighbours.map((n) => {
+              const c = categoryColour(n.category || "general");
+              return (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => onHop(n.id)}
+                  className="flex shrink-0 items-center gap-1.5 rounded-full border border-canvas-border bg-canvas-bg px-3 py-1.5 text-xs text-neutral-300 transition-colors hover:border-neutral-500 hover:text-neutral-100"
+                >
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: c.stroke }}
+                    aria-hidden="true"
+                  />
+                  <span className="max-w-[10rem] truncate">{n.title}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      <div className="mt-3 flex gap-2">
+      {trail.length > 0 && (
+        <div className="mt-3 border-t border-canvas-border/60 pt-2.5">
+          <button
+            type="button"
+            onClick={() => setShowTrail((v) => !v)}
+            className="flex w-full items-center justify-between text-left text-xs font-medium text-neutral-400 hover:text-neutral-200"
+          >
+            <span>
+              Memory trail ({trail.length}) — the thoughts behind this
+            </span>
+            <span className={showTrail ? "rotate-180 transition-transform" : "transition-transform"}>
+              ▾
+            </span>
+          </button>
+          {showTrail && (
+            <ul className="mt-2 space-y-2">
+              {trail.map((t) => (
+                <li
+                  key={t.id}
+                  className="rounded-lg border border-canvas-border/60 bg-canvas-bg px-3 py-2"
+                >
+                  <p className="whitespace-pre-wrap text-xs leading-relaxed text-neutral-300">
+                    {t.content}
+                  </p>
+                  <p className="mt-1 text-[10px] text-neutral-600">
+                    {trailFormatter.format(new Date(t.created_at))}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3 flex items-center gap-2">
         <button
           type="button"
           onClick={onAskAI}
           className="flex-1 rounded-full bg-teal-600/90 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-500"
         >
-          Ask AI
+          Ask AI about this
         </button>
         <button
           type="button"
-          onClick={onDetails}
-          className="flex-1 rounded-full border border-canvas-border px-4 py-2 text-sm text-neutral-300 transition-colors hover:text-neutral-100"
+          onClick={onEdit}
+          className="rounded-full px-3 py-2 text-xs text-neutral-500 transition-colors hover:text-neutral-300"
         >
-          Details
+          Edit
         </button>
       </div>
     </div>

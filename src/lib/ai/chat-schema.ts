@@ -36,6 +36,10 @@ export const ChatResponseSchema = z.object({
   answer: z.string().min(1).max(6000),
   citations: z.array(ChatCitationSchema).max(20).default([]),
   proposed_graph_changes: ProposedGraphChangesSchema.optional(),
+  // NotebookLM-style suggested next explorations — short, tappable prompts
+  // that open a new thread of thought. Always 2-4 when there's anything to
+  // explore; phrased as the user would ask them.
+  follow_up_topics: z.array(z.string().min(1).max(120)).max(4).default([]),
 });
 
 export type ChatResponse = z.infer<typeof ChatResponseSchema>;

@@ -24,6 +24,8 @@ type UiMessage = {
   content: string;
   citations: ChatCitation[];
   suggestion?: Suggestion;
+  // Suggested next explorations (NotebookLM-style), tappable to continue.
+  followUps?: string[];
   // Set on a user turn that got no assistant response. `persisted` tells the
   // retry whether the server already stored the turn (regenerate) or not
   // (re-send the text).
@@ -238,6 +240,9 @@ export function ChatPanel({
           content: json.answer ?? "",
           citations: (json.citations ?? []) as ChatCitation[],
           suggestion,
+          followUps: Array.isArray(json.follow_up_topics)
+            ? (json.follow_up_topics as string[])
+            : [],
         };
         setMessages((prev) => [...prev, assistantMsg]);
       } catch (err) {
@@ -296,18 +301,19 @@ export function ChatPanel({
 
   if (!open) return null;
 
+  const lastMessageId = messages[messages.length - 1]?.id;
+
   return (
     <>
-      <div
-        onClick={onClose}
-        className="fixed inset-0 z-40 bg-black/50 transition-opacity duration-300 lg:hidden"
-      />
+      {/* No dimming backdrop — the 3D network stays visible and alive behind
+          a translucent panel, so chat feels part of the same space. */}
       <div
         className={[
-          "fixed z-50 flex flex-col bg-canvas-surface",
-          // Mobile: bottom sheet (82vh). Desktop (lg+): right-docked panel.
-          "bottom-0 left-0 right-0 h-[82vh] rounded-t-2xl border-t border-canvas-border",
-          "lg:left-auto lg:right-0 lg:top-0 lg:bottom-0 lg:h-auto lg:w-[420px]",
+          "fixed z-50 flex flex-col bg-canvas-surface/85 backdrop-blur-xl",
+          // Mobile: shorter bottom sheet so the network shows above it.
+          "bottom-0 left-0 right-0 h-[60vh] rounded-t-2xl border-t border-canvas-border/70",
+          // Desktop (lg+): right-docked panel, network visible to its left.
+          "lg:left-auto lg:right-0 lg:top-0 lg:bottom-0 lg:h-auto lg:w-[400px]",
           "lg:rounded-t-none lg:rounded-l-2xl lg:border-t-0 lg:border-l lg:shadow-2xl lg:shadow-black/40",
         ].join(" ")}
       >
@@ -347,15 +353,36 @@ export function ChatPanel({
         {/* Messages */}
         <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
           {messages.length === 0 && !sending && (
-            <div className="mt-4 space-y-2 text-center">
+            <div className="mt-2 space-y-3">
               <p className="text-sm text-neutral-300">
-                Ask about your graph and sources.
-              </p>
-              <p className="text-xs text-neutral-500">
                 {focusNode
-                  ? `Focused on "${focusNode.title}". Ask anything about it.`
-                  : "Try: “What themes connect my recent thoughts?”"}
+                  ? `Let's think about "${focusNode.title}".`
+                  : "I can see your whole network. What do you want to explore?"}
               </p>
+              <div className="space-y-1.5">
+                {(focusNode
+                  ? [
+                      `What connects to "${focusNode.title}"?`,
+                      `What am I missing about "${focusNode.title}"?`,
+                      `Where could "${focusNode.title}" lead next?`,
+                    ]
+                  : [
+                      "What themes connect my recent thoughts?",
+                      "What ideas seem isolated and worth linking?",
+                      "What should I explore next?",
+                    ]
+                ).map((t, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => send(undefined, t)}
+                    className="flex w-full items-center gap-2 rounded-xl border border-teal-400/25 bg-teal-950/15 px-3 py-2 text-left text-xs text-teal-100 transition-colors hover:bg-teal-950/35"
+                  >
+                    <span className="text-teal-400">→</span>
+                    <span>{t}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -389,6 +416,28 @@ export function ChatPanel({
                   onDismissed={() => updateSuggestionStatus(m.id, "dismissed")}
                 />
               )}
+              {m.role === "assistant" &&
+                m.id === lastMessageId &&
+                !sending &&
+                (m.followUps?.length ?? 0) > 0 && (
+                  <div className="mt-2.5 space-y-1.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                      Explore next
+                    </p>
+                    {m.followUps!.map((t, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        disabled={sending}
+                        onClick={() => send(undefined, t)}
+                        className="flex w-full items-center gap-2 rounded-xl border border-teal-400/25 bg-teal-950/15 px-3 py-2 text-left text-xs text-teal-100 transition-colors hover:bg-teal-950/35 disabled:opacity-40"
+                      >
+                        <span className="text-teal-400">→</span>
+                        <span>{t}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
             </div>
           ))}
 
