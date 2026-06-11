@@ -83,7 +83,7 @@ Use:
 - TypeScript
 - Tailwind CSS
 - Supabase
-- React Flow via `@xyflow/react`
+- 3D canvas via `react-force-graph-3d` (three.js) — the default neural-network view; the legacy 2D React Flow canvas (`@xyflow/react`) remains behind `NEXT_PUBLIC_USE_3D=0`
 - OpenAI or another AI provider through a server-side API route
 - Zod for validating AI responses
 - UUIDs for database identifiers

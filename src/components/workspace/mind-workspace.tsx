@@ -20,7 +20,9 @@ const Graph3D = dynamic(
   },
 );
 
-const USE_3D = process.env.NEXT_PUBLIC_USE_3D === "1";
+// 3D neural-network canvas is the default surface. Set NEXT_PUBLIC_USE_3D=0
+// to fall back to the legacy 2D React Flow canvas.
+const USE_3D = process.env.NEXT_PUBLIC_USE_3D !== "0";
 import { NodeDetail } from "@/components/nodes/node-detail";
 import { ThoughtInputForm } from "@/components/input/thought-input-form";
 import { QuickCapture } from "@/components/input/quick-capture";
@@ -81,6 +83,7 @@ type ActiveSheet =
   | "documents"
   | "upload"
   | "suggestion"
+  | "more"
   | null;
 
 type ApiSuggestion = {
@@ -1096,6 +1099,8 @@ export function MindWorkspace({
             </svg>
           </button>
 
+          {!USE_3D ? (
+          <>
           {/* AI / Suggest — sparkle icon */}
           <button
             type="button"
@@ -1195,6 +1200,28 @@ export function MindWorkspace({
               </span>
             )}
           </button>
+          </>
+          ) : (
+            /* 3D shell: everything secondary lives behind one menu. */
+            <button
+              type="button"
+              onClick={() => openSheet("more")}
+              aria-label="More — search, documents, thoughts, insights"
+              title="More"
+              className="relative flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <circle cx="3" cy="7" r="1.1" fill="currentColor" />
+                <circle cx="7" cy="7" r="1.1" fill="currentColor" />
+                <circle cx="11" cy="7" r="1.1" fill="currentColor" />
+              </svg>
+              {(unpromotedCount > 0 || insightCount > 0) && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-teal-600 text-[8px] font-bold leading-none text-white">
+                  {Math.min(unpromotedCount + insightCount, 9)}
+                </span>
+              )}
+            </button>
+          )}
 
           {/* Avatar / sign out */}
           <form action={signOutAction}>
@@ -1223,7 +1250,9 @@ export function MindWorkspace({
         </div>
       )}
 
-      {/* Graph control tray — bottom-left glass pill, above safe area */}
+      {/* Graph control tray — bottom-left glass pill, above safe area.
+          2D only: in 3D the force simulation + camera replace these. */}
+      {!USE_3D && (
       <div
         className="fixed left-4 z-20 flex items-center gap-0.5 rounded-full border border-canvas-border bg-canvas-surface/90 px-1.5 py-1.5 shadow-md backdrop-blur-sm"
         style={{ bottom: "max(24px, calc(env(safe-area-inset-bottom) + 8px))" }}
@@ -1328,6 +1357,7 @@ export function MindWorkspace({
           </>
         )}
       </div>
+      )}
 
       {USE_3D ? (
         <div
@@ -1414,6 +1444,42 @@ export function MindWorkspace({
             addAsIsPending={addAsIsPending}
           />
         )}
+      </BottomSheet>
+
+      <BottomSheet
+        open={activeSheet === "more"}
+        onClose={closeSheet}
+        title="More"
+      >
+        <div className="flex flex-col gap-1">
+          {[
+            { key: "search" as const, label: "Search", hint: "Find thoughts, nodes, documents" },
+            { key: "thoughts" as const, label: "Recent thoughts", hint: `${unpromotedCount} not yet on the canvas`, badge: unpromotedCount },
+            { key: "documents" as const, label: "Documents", hint: `${sourceDocuments.length} uploaded`, badge: sourceDocuments.length },
+            ...(insightCount > 0
+              ? [{ key: "insights" as const, label: "Insights", hint: `${insightCount} suggestion${insightCount === 1 ? "" : "s"}`, badge: insightCount }]
+              : []),
+          ].map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => openSheet(item.key)}
+              className="flex items-center justify-between rounded-lg border border-canvas-border bg-canvas-bg px-4 py-3 text-left transition-colors hover:border-neutral-500"
+            >
+              <span>
+                <span className="block text-sm font-medium text-neutral-100">
+                  {item.label}
+                </span>
+                <span className="block text-xs text-neutral-500">{item.hint}</span>
+              </span>
+              {"badge" in item && item.badge ? (
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-teal-600 px-1.5 text-xs font-semibold text-white">
+                  {item.badge}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
       </BottomSheet>
 
       <BottomSheet
