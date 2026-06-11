@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 
 import { Canvas, type GhostSuggestion } from "@/components/canvas/Canvas";
+import type { PreviewNode } from "@/components/canvas/graph-3d";
 
 // The 3D canvas touches WebGL/`window`, so it must be browser-only.
 // Loaded behind the NEXT_PUBLIC_USE_3D flag during the 3D migration.
@@ -22,6 +23,7 @@ const Graph3D = dynamic(
 const USE_3D = process.env.NEXT_PUBLIC_USE_3D === "1";
 import { NodeDetail } from "@/components/nodes/node-detail";
 import { ThoughtInputForm } from "@/components/input/thought-input-form";
+import { QuickCapture } from "@/components/input/quick-capture";
 import { RecentThoughtsList } from "@/components/input/recent-thoughts-list";
 import {
   SuggestionReview,
@@ -369,7 +371,9 @@ export function MindWorkspace({
 
   const requestSuggestion = useCallback(async (memoryId: string) => {
     setCaptureReview({ phase: "loading", memoryId });
-    setActiveSheet("suggestion");
+    // In 3D, the proposal is reviewed as a glowing preview node on the canvas
+    // (one-tap confirm), not in a sheet. In 2D, open the review sheet.
+    if (!USE_3D) setActiveSheet("suggestion");
     try {
       const res = await fetch("/api/suggest", {
         method: "POST",
@@ -459,6 +463,20 @@ export function MindWorkspace({
       setAddAsIsPending(false);
     }
   }, [captureReview, applyGraphDelta]);
+
+  // The glowing one-tap preview node, derived from a ready suggestion (3D only).
+  const previewNode = useMemo<PreviewNode | null>(() => {
+    if (!USE_3D || captureReview?.phase !== "ready") return null;
+    const { suggestion, target_node, edge_targets } = captureReview.data;
+    return {
+      title: suggestion.title,
+      category: suggestion.category,
+      linkTargetIds: [
+        ...(target_node ? [target_node.id] : []),
+        ...edge_targets.map((t) => t.id),
+      ],
+    };
+  }, [captureReview]);
 
   // Insights derived from the in-memory graph.
   const insights = useMemo(
@@ -1025,6 +1043,9 @@ export function MindWorkspace({
             edges={visibleEdges}
             selectedNodeId={selectedNodeId}
             onNodeSelect={handleNodeSelect}
+            preview={previewNode}
+            onPreviewConfirm={handleSuggestionAccept}
+            onPreviewDismiss={handleSuggestionDismiss}
           />
         ) : (
           <Canvas
@@ -1308,28 +1329,56 @@ export function MindWorkspace({
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={() => openSheet("composer")}
-        aria-label="Add thought"
-        className={[
-          "fixed right-5 z-20",
-          "flex h-14 w-14 items-center justify-center",
-          "rounded-full bg-neutral-100 shadow-lg shadow-black/50",
-          "text-canvas-bg transition-all duration-200",
-          sheetOpen ? "scale-0 opacity-0 pointer-events-none" : "scale-100 opacity-100",
-        ].join(" ")}
-        style={{ bottom: "max(24px, calc(env(safe-area-inset-bottom) + 8px))" }}
-      >
-        <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-          <path
-            d="M11 4v14M4 11h14"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
+      {USE_3D ? (
+        <div
+          className="fixed inset-x-0 z-20 mx-auto w-[min(560px,calc(100%-2rem))] px-2"
+          style={{ bottom: "max(20px, calc(env(safe-area-inset-bottom) + 8px))" }}
+        >
+          {previewNode && (
+            <div className="mb-2 rounded-xl border border-sky-400/40 bg-canvas-surface/90 px-4 py-3 text-sm shadow-lg shadow-black/40 backdrop-blur-md">
+              <p className="text-neutral-200">
+                Tap the glowing{" "}
+                <span className="font-medium text-sky-300">
+                  {previewNode.title}
+                </span>{" "}
+                to keep it · tap empty space to discard.
+              </p>
+              {captureReview?.phase === "ready" && (
+                <p className="mt-1 text-xs text-neutral-400">
+                  {captureReview.data.suggestion.explanation}
+                </p>
+              )}
+            </div>
+          )}
+          <QuickCapture
+            onSuccess={requestSuggestion}
+            busy={captureReview?.phase === "loading"}
           />
-        </svg>
-      </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => openSheet("composer")}
+          aria-label="Add thought"
+          className={[
+            "fixed right-5 z-20",
+            "flex h-14 w-14 items-center justify-center",
+            "rounded-full bg-neutral-100 shadow-lg shadow-black/50",
+            "text-canvas-bg transition-all duration-200",
+            sheetOpen ? "scale-0 opacity-0 pointer-events-none" : "scale-100 opacity-100",
+          ].join(" ")}
+          style={{ bottom: "max(24px, calc(env(safe-area-inset-bottom) + 8px))" }}
+        >
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <path
+              d="M11 4v14M4 11h14"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      )}
 
       <div
         onClick={closeSheet}

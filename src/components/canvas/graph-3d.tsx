@@ -37,20 +37,43 @@ type FGLink = {
 };
 
 const SELECTED_COLOR = "#5eead4";
+const PREVIEW_COLOR = "#7dd3fc";
 const BACKGROUND_COLOR = "#0f1115";
+const PREVIEW_ID = "__preview__";
+
+// The AI's proposed placement for a just-captured thought, rendered as a
+// glowing candidate node. One tap on it keeps it (onPreviewConfirm); a tap
+// on empty space discards it (onPreviewDismiss). This IS the reviewable
+// suggestion — nothing is written to the graph until the tap.
+export type PreviewNode = {
+  title: string;
+  category: string;
+  // Existing node ids the proposed node would link to (shown as preview edges).
+  linkTargetIds: string[];
+};
 
 export type Graph3DProps = {
   nodes: GraphNode[];
   edges: GraphEdge[];
   selectedNodeId: string | null;
   onNodeSelect: (id: string | null) => void;
+  preview: PreviewNode | null;
+  onPreviewConfirm: () => void;
+  onPreviewDismiss: () => void;
 };
+
+function linkNodeId(end: string | { id: string }): string {
+  return typeof end === "object" ? end.id : end;
+}
 
 export function Graph3D({
   nodes,
   edges,
   selectedNodeId,
   onNodeSelect,
+  preview,
+  onPreviewConfirm,
+  onPreviewDismiss,
 }: Graph3DProps) {
   const fgRef = useRef<ForceGraphMethods<FGNode, FGLink> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -113,10 +136,33 @@ export function Graph3D({
       target: e.target_node_id,
       label: e.label ?? e.relationship_type,
     }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // The glowing preview node + its proposed edges, while a suggestion is open.
+    if (preview) {
+      const pColor = categoryColour(preview.category || "general").stroke;
+      const existing = cache.get(PREVIEW_ID);
+      const pNode: FGNode = existing ?? {
+        id: PREVIEW_ID,
+        label: preview.title,
+        category: preview.category,
+        color: pColor,
+        val: 6,
+      };
+      pNode.label = preview.title;
+      pNode.category = preview.category;
+      pNode.color = pColor;
+      pNode.val = 6;
+      cache.set(PREVIEW_ID, pNode);
+      seen.add(PREVIEW_ID);
+      fgNodes.push(pNode);
+      for (const tid of preview.linkTargetIds) {
+        if (seen.has(tid)) {
+          fgLinks.push({ source: PREVIEW_ID, target: tid, label: "" });
+        }
+      }
+    }
     return { nodes: fgNodes, links: fgLinks };
-    // graphData identity is keyed by the node/edge id sets (+ degree).
-  }, [nodes, edges, degrees]);
+    // graphData identity is keyed by the node/edge id sets (+ degree + preview).
+  }, [nodes, edges, degrees, preview]);
 
   // Measure the container so the canvas fills it responsively.
   useEffect(() => {
@@ -147,18 +193,31 @@ export function Graph3D({
   }, [selectedNodeId]);
 
   const nodeColor = useCallback(
-    (node: FGNode) => (node.id === selectedNodeId ? SELECTED_COLOR : node.color),
+    (node: FGNode) => {
+      if (node.id === PREVIEW_ID) return PREVIEW_COLOR;
+      return node.id === selectedNodeId ? SELECTED_COLOR : node.color;
+    },
     [selectedNodeId],
   );
 
   const nodeVal = useCallback(
-    (node: FGNode) => (node.id === selectedNodeId ? node.val * 1.6 : node.val),
+    (node: FGNode) => {
+      if (node.id === PREVIEW_ID) return node.val;
+      return node.id === selectedNodeId ? node.val * 1.6 : node.val;
+    },
     [selectedNodeId],
   );
 
   // Always-visible calm label sprite, drawn above the default sphere.
   const nodeThreeObject = useCallback(
     (node: FGNode) => {
+      if (node.id === PREVIEW_ID) {
+        const sprite = new SpriteText(`✦ ${node.label}`);
+        sprite.color = PREVIEW_COLOR;
+        sprite.textHeight = 5.5;
+        sprite.position.set(0, (node.val ?? 1) + 7, 0);
+        return sprite;
+      }
       const sprite = new SpriteText(node.label);
       sprite.color =
         node.id === selectedNodeId ? SELECTED_COLOR : "rgba(229,229,229,0.85)";
@@ -169,15 +228,46 @@ export function Graph3D({
     [selectedNodeId],
   );
 
-  const handleNodeClick = useCallback(
-    (node: FGNode) => onNodeSelect(node.id),
-    [onNodeSelect],
+  const linkColor = useCallback(
+    (link: { source: string | { id: string }; target: string | { id: string } }) => {
+      if (
+        linkNodeId(link.source) === PREVIEW_ID ||
+        linkNodeId(link.target) === PREVIEW_ID
+      ) {
+        return "rgba(125,211,252,0.7)";
+      }
+      return "rgba(148,163,184,0.35)";
+    },
+    [],
   );
 
-  const handleBackgroundClick = useCallback(
-    () => onNodeSelect(null),
-    [onNodeSelect],
+  const linkWidth = useCallback(
+    (link: { source: string | { id: string }; target: string | { id: string } }) =>
+      linkNodeId(link.source) === PREVIEW_ID ||
+      linkNodeId(link.target) === PREVIEW_ID
+        ? 1.4
+        : 0.5,
+    [],
   );
+
+  const handleNodeClick = useCallback(
+    (node: FGNode) => {
+      if (node.id === PREVIEW_ID) {
+        onPreviewConfirm();
+        return;
+      }
+      onNodeSelect(node.id);
+    },
+    [onNodeSelect, onPreviewConfirm],
+  );
+
+  const handleBackgroundClick = useCallback(() => {
+    if (preview) {
+      onPreviewDismiss();
+      return;
+    }
+    onNodeSelect(null);
+  }, [preview, onPreviewDismiss, onNodeSelect]);
 
   return (
     <div ref={containerRef} className="h-full w-full" style={{ touchAction: "none" }}>
@@ -196,8 +286,8 @@ export function Graph3D({
           nodeResolution={16}
           nodeThreeObject={nodeThreeObject}
           nodeThreeObjectExtend
-          linkColor={() => "rgba(148,163,184,0.35)"}
-          linkWidth={0.5}
+          linkColor={linkColor}
+          linkWidth={linkWidth}
           linkDirectionalParticles={0}
           linkLabel={(link: FGLink) => link.label}
           onNodeClick={handleNodeClick}
