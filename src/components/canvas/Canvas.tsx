@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   ReactFlow,
   Background,
@@ -586,6 +586,11 @@ export function Canvas({
   // live position of nodes the user has dragged this session. Focus/connected/
   // dimmed flags and ghost nodes are applied in the same pass so visibility,
   // selection styling, and ghosts never race each other.
+  //
+  // Position rule: a node keeps its live (possibly mid-drag) position unless
+  // the stored position actually changed since we last saw it — i.e. the
+  // server moved it (tidy/declutter) — in which case the new position wins.
+  const lastStoredPos = useRef<Map<string, { x: number; y: number }>>(new Map());
   useEffect(() => {
     setNodes((prev) => {
       const prevPos = new Map(
@@ -594,7 +599,13 @@ export function Canvas({
           .map((n) => [n.id, n.position]),
       );
       const realNodes = toFlowNodes(dbNodes, collapsedCounts).map((n) => {
-        const position = prevPos.get(n.id) ?? n.position;
+        const last = lastStoredPos.current.get(n.id);
+        const storedMoved =
+          !last || last.x !== n.position.x || last.y !== n.position.y;
+        lastStoredPos.current.set(n.id, { x: n.position.x, y: n.position.y });
+        const position = storedMoved
+          ? n.position
+          : (prevPos.get(n.id) ?? n.position);
         const focused = n.id === selectedNodeId;
         const connected = connectedIds.has(n.id);
         const dimmed = selectedNodeId !== null && !focused && !connected;

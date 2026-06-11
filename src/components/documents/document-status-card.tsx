@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import type { SourceDocument } from "@/lib/graph/queries";
 import { deleteDocumentGraphAction } from "@/lib/graph/actions";
 
@@ -63,7 +62,6 @@ export function DocumentStatusCard({
   document: SourceDocument;
   onSelectNode?: (nodeId: string) => void;
 }) {
-  const router = useRouter();
   const type = fileLabel(document.mime_type, document.original_filename);
   const recovered =
     document.status === "processed_with_warnings" &&
@@ -104,7 +102,6 @@ export function DocumentStatusCard({
           ? "Graph removed."
           : `Removed ${count} node${count === 1 ? "" : "s"} from graph.`,
       );
-      router.refresh();
     });
   };
 

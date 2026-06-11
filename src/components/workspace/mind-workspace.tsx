@@ -6,15 +6,27 @@ import { Canvas, type GhostSuggestion } from "@/components/canvas/Canvas";
 import { NodeDetail } from "@/components/nodes/node-detail";
 import { ThoughtInputForm } from "@/components/input/thought-input-form";
 import { RecentThoughtsList } from "@/components/input/recent-thoughts-list";
+import {
+  SuggestionReview,
+  type CaptureReviewState,
+} from "@/components/input/suggestion-review";
+import { SearchSheet } from "@/components/search/search-sheet";
 import { DocumentList } from "@/components/documents/document-list";
 import { DocumentUploadSheet } from "@/components/documents/document-upload-sheet";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { signOutAction } from "@/app/login/actions";
 import {
+  createNodeFromMemoryAction,
   pinGhostSuggestionAction,
   declutterGraphAction,
 } from "@/lib/graph/actions";
+import {
+  applyCaptureSuggestionAction,
+  dismissCaptureSuggestionAction,
+} from "@/lib/graph/suggestion-actions";
+import type { CaptureSuggestionResponse } from "@/lib/ai/suggest-schema";
 import { deriveInsights, summarizeInsights, type Insight } from "@/lib/graph/insights";
+import type { GraphDelta } from "@/lib/graph/delta";
 import {
   computeVisibleNodeIds,
   descendantsOf,
@@ -49,6 +61,7 @@ type ActiveSheet =
   | "insights"
   | "documents"
   | "upload"
+  | "suggestion"
   | null;
 
 type ApiSuggestion = {
@@ -131,20 +144,50 @@ function BottomSheet({
   title: string;
   children: React.ReactNode;
 }) {
+  // Escape closes the sheet, except while the user is typing in a field
+  // (text inputs use Escape to cancel their own editing).
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      aria-hidden={!open}
       className={[
-        "fixed bottom-0 left-0 right-0 z-40 flex flex-col",
-        "rounded-t-2xl border-t border-canvas-border bg-canvas-surface",
+        "fixed z-40 flex flex-col bg-canvas-surface",
         "transition-transform duration-300 ease-in-out",
-        open ? "translate-y-0" : "translate-y-full",
+        // Mobile: bottom sheet. Desktop (lg+): right-docked side panel that
+        // leaves the canvas usable to its left.
+        "bottom-0 left-0 right-0 max-h-[75vh] rounded-t-2xl border-t border-canvas-border",
+        "lg:left-auto lg:right-0 lg:top-0 lg:bottom-0 lg:w-[420px] lg:max-h-none",
+        "lg:rounded-t-none lg:rounded-l-2xl lg:border-t-0 lg:border-l lg:shadow-2xl lg:shadow-black/40",
+        open
+          ? "translate-y-0 lg:translate-x-0"
+          : "translate-y-full pointer-events-none lg:translate-y-0 lg:translate-x-full",
       ].join(" ")}
-      style={{ maxHeight: "75vh" }}
     >
-      <div className="flex shrink-0 items-center justify-between px-5 pb-3 pt-4">
+      <div className="flex shrink-0 items-center justify-between px-5 pb-3 pt-4 lg:hidden">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-700" />
       </div>
-      <div className="flex shrink-0 items-center justify-between px-5 pb-3">
+      <div className="flex shrink-0 items-center justify-between px-5 pb-3 lg:pt-4">
         <p className="text-sm font-semibold text-neutral-200">{title}</p>
         <button
           type="button"
@@ -184,9 +227,57 @@ export function MindWorkspace({
   userEmail,
 }: MindWorkspaceProps) {
   const router = useRouter();
+
+  // Local graph state, seeded from the server and reconciled whenever
+  // revalidated props arrive. Mutations merge their returned rows here
+  // immediately, so the canvas updates without waiting on a route refresh.
+  const [graphNodes, setGraphNodes] = useState<GraphNode[]>(initialNodes);
+  const [graphEdges, setGraphEdges] = useState<GraphEdge[]>(initialEdges);
+  useEffect(() => setGraphNodes(initialNodes), [initialNodes]);
+  useEffect(() => setGraphEdges(initialEdges), [initialEdges]);
+
+  const applyGraphDelta = useCallback((delta: GraphDelta) => {
+    if (delta.upsertNodes?.length || delta.removeNodeIds?.length) {
+      setGraphNodes((prev) => {
+        const removed = new Set(delta.removeNodeIds ?? []);
+        const byId = new Map(
+          prev.filter((n) => !removed.has(n.id)).map((n) => [n.id, n]),
+        );
+        for (const n of delta.upsertNodes ?? []) byId.set(n.id, n);
+        return Array.from(byId.values());
+      });
+    }
+    if (delta.upsertEdges?.length || delta.removeEdgeIds?.length || delta.removeNodeIds?.length) {
+      setGraphEdges((prev) => {
+        const removedEdges = new Set(delta.removeEdgeIds ?? []);
+        const removedNodes = new Set(delta.removeNodeIds ?? []);
+        const byId = new Map(
+          prev
+            .filter(
+              (e) =>
+                !removedEdges.has(e.id) &&
+                !removedNodes.has(e.source_node_id) &&
+                !removedNodes.has(e.target_node_id),
+            )
+            .map((e) => [e.id, e]),
+        );
+        for (const e of delta.upsertEdges ?? []) byId.set(e.id, e);
+        return Array.from(byId.values());
+      });
+    }
+  }, []);
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
   const [uploadToast, setUploadToast] = useState<string | null>(null);
+
+  // Toasts auto-dismiss after a few seconds (manual close still works);
+  // errors linger a little longer than confirmations.
+  useEffect(() => {
+    if (!uploadToast) return;
+    const timer = setTimeout(() => setUploadToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [uploadToast]);
   const [ghosts, setGhosts] = useState<GhostSuggestion[]>([]);
   // ghostId -> real_node_id created when that ghost was pinned. Lets a
   // child ghost (whose parent has already been pinned) connect to the
@@ -196,7 +287,11 @@ export function MindWorkspace({
   const pinningGhostIdRef = useRef<Set<string>>(new Set());
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
+  useEffect(() => {
+    if (!aiError) return;
+    const timer = setTimeout(() => setAiError(null), 7000);
+    return () => clearTimeout(timer);
+  }, [aiError]);
   const [hideGhosts, setHideGhosts] = useState(false);
   const [activeRootNodeId, setActiveRootNodeId] = useState<string | null>(null);
   const [activeGhostPathIds, setActiveGhostPathIds] = useState<string[]>([]);
@@ -251,36 +346,121 @@ export function MindWorkspace({
     [],
   );
 
+  // Capture suggestion review — the AI's proposal for a just-saved thought.
+  const [captureReview, setCaptureReview] = useState<CaptureReviewState | null>(null);
+  const [addAsIsPending, setAddAsIsPending] = useState(false);
+
+  const requestSuggestion = useCallback(async (memoryId: string) => {
+    setCaptureReview({ phase: "loading", memoryId });
+    setActiveSheet("suggestion");
+    try {
+      const res = await fetch("/api/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memory_entry_id: memoryId }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setCaptureReview({
+          phase: "error",
+          memoryId,
+          error: json.error ?? "Could not get a suggestion.",
+        });
+        return;
+      }
+      setCaptureReview({
+        phase: "ready",
+        memoryId,
+        data: json as CaptureSuggestionResponse,
+      });
+    } catch {
+      setCaptureReview({ phase: "error", memoryId, error: "Network error." });
+    }
+  }, []);
+
+  const handleSuggestionAccept = useCallback(async () => {
+    if (!captureReview || captureReview.phase !== "ready") return;
+    const { memoryId, data } = captureReview;
+    setCaptureReview({ phase: "applying", memoryId, data });
+    const result = await applyCaptureSuggestionAction(data.suggestion_id);
+    if (!result.success) {
+      setCaptureReview({
+        phase: "error",
+        memoryId,
+        error: result.error ?? "Could not apply the suggestion.",
+      });
+      return;
+    }
+    applyGraphDelta({
+      upsertNodes: result.node ? [result.node] : [],
+      upsertEdges: result.edges ?? [],
+    });
+    setCaptureReview(null);
+    setActiveSheet(null);
+    setUploadToast(
+      result.action === "update_node"
+        ? "Updated the existing thought."
+        : "Added to your canvas.",
+    );
+  }, [captureReview, applyGraphDelta]);
+
+  const handleSuggestionDismiss = useCallback(() => {
+    if (captureReview && (captureReview.phase === "ready" || captureReview.phase === "applying")) {
+      void dismissCaptureSuggestionAction(captureReview.data.suggestion_id);
+    }
+    setCaptureReview(null);
+    setActiveSheet(null);
+  }, [captureReview]);
+
+  const handleSuggestionAddAsIs = useCallback(async () => {
+    if (!captureReview) return;
+    const { memoryId } = captureReview;
+    setAddAsIsPending(true);
+    try {
+      const result = await createNodeFromMemoryAction(memoryId);
+      if (!result.success && result.error !== "already_on_canvas") {
+        setCaptureReview({
+          phase: "error",
+          memoryId,
+          error: result.error ?? "Could not add to canvas.",
+        });
+        return;
+      }
+      if (result.success) {
+        applyGraphDelta({
+          upsertNodes: result.node ? [result.node] : [],
+          upsertEdges: result.edges ?? [],
+        });
+      }
+      if (captureReview.phase === "ready" || captureReview.phase === "applying") {
+        void dismissCaptureSuggestionAction(captureReview.data.suggestion_id);
+      }
+      setCaptureReview(null);
+      setActiveSheet(null);
+      setUploadToast("Added to your canvas.");
+    } finally {
+      setAddAsIsPending(false);
+    }
+  }, [captureReview, applyGraphDelta]);
+
   // Insights derived from the in-memory graph.
   const insights = useMemo(
-    () => deriveInsights(initialNodes, initialEdges),
-    [initialNodes, initialEdges],
+    () => deriveInsights(graphNodes, graphEdges),
+    [graphNodes, graphEdges],
   );
   const insightSummary = useMemo(() => summarizeInsights(insights), [insights]);
   const insightCount = insights.length;
-
-  const searchResults = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return [];
-    return initialNodes
-      .filter(
-        (n) =>
-          n.title.toLowerCase().includes(q) ||
-          n.summary.toLowerCase().includes(q),
-      )
-      .slice(0, 20);
-  }, [initialNodes, searchQuery]);
 
   // Derive which nodes/edges the canvas should actually render. Documents are
   // collapsed to their root by default; focus mode narrows to the selected
   // node's neighbourhood. The full graph stays the source of truth.
   const { visibleNodes, visibleEdges, collapsedCounts } = useMemo(() => {
-    const vmEdges = initialEdges.map((e) => ({
+    const vmEdges = graphEdges.map((e) => ({
       source_node_id: e.source_node_id,
       target_node_id: e.target_node_id,
     }));
     const visibleIds = computeVisibleNodeIds({
-      nodes: initialNodes.map((n) => ({ id: n.id, origin: n.origin })),
+      nodes: graphNodes.map((n) => ({ id: n.id, origin: n.origin })),
       edges: vmEdges,
       mode: viewMode,
       selectedNodeId,
@@ -289,8 +469,8 @@ export function MindWorkspace({
       documentMembership: documentNodeMembership,
       collapsedNodeIds,
     });
-    const nodes = initialNodes.filter((n) => visibleIds.has(n.id));
-    const edges = initialEdges.filter(
+    const nodes = graphNodes.filter((n) => visibleIds.has(n.id));
+    const edges = graphEdges.filter(
       (e) =>
         visibleIds.has(e.source_node_id) && visibleIds.has(e.target_node_id),
     );
@@ -306,8 +486,8 @@ export function MindWorkspace({
     }
     return { visibleNodes: nodes, visibleEdges: edges, collapsedCounts: counts };
   }, [
-    initialNodes,
-    initialEdges,
+    graphNodes,
+    graphEdges,
     viewMode,
     selectedNodeId,
     expandBranch,
@@ -339,6 +519,7 @@ export function MindWorkspace({
   const closeSheet = useCallback(() => {
     setActiveSheet(null);
     setSelectedNodeId(null);
+    setCaptureReview(null);
   }, []);
 
   const handleNodeSelect = useCallback((id: string | null) => {
@@ -416,7 +597,7 @@ export function MindWorkspace({
       let anchorX = 0;
       let anchorY = 0;
       if (targetNodeId) {
-        const sel = initialNodes.find((n) => n.id === targetNodeId);
+        const sel = graphNodes.find((n) => n.id === targetNodeId);
         if (sel) {
           anchorX = sel.position_x;
           anchorY = sel.position_y;
@@ -449,7 +630,7 @@ export function MindWorkspace({
     } finally {
       setAiLoading(false);
     }
-  }, [selectedNodeId, initialNodes, ghosts, callExplore]);
+  }, [selectedNodeId, graphNodes, ghosts, callExplore]);
 
   const handleGhostExplore = useCallback(
     async (ghostId: string) => {
@@ -557,6 +738,11 @@ export function MindWorkspace({
         if (result.node_id) {
           setPinnedGhostMap((prev) => ({ ...prev, [ghost.id]: result.node_id! }));
         }
+        // Show the new node (and its edge) on the canvas immediately.
+        applyGraphDelta({
+          upsertNodes: result.node ? [result.node] : [],
+          upsertEdges: result.edge ? [result.edge] : [],
+        });
         const next = getGhostPathState(ghosts, ghostId);
         setActiveRootNodeId(next.activeRootNodeId);
         setActiveGhostPathIds(next.activeGhostPathIds);
@@ -568,7 +754,7 @@ export function MindWorkspace({
         setPinningGhostIds((prev) => prev.filter((id) => id !== ghostId));
       }
     },
-    [ghosts, pinnedGhostMap],
+    [ghosts, pinnedGhostMap, applyGraphDelta],
   );
 
   const handleClearGhosts = useCallback(() => {
@@ -591,19 +777,29 @@ export function MindWorkspace({
         setAiError(result.error ?? "Could not tidy the graph.");
         return;
       }
+      // Apply the new positions locally — no route refresh needed.
+      if (result.moves && result.moves.length > 0) {
+        const moveById = new Map(result.moves.map((m) => [m.id, m]));
+        setGraphNodes((prev) =>
+          prev.map((n) => {
+            const move = moveById.get(n.id);
+            return move
+              ? { ...n, position_x: move.position_x, position_y: move.position_y }
+              : n;
+          }),
+        );
+      }
       setUploadToast(
         result.moved === 0
           ? "Graph is already tidy."
           : `Tidied ${result.moved} node${result.moved === 1 ? "" : "s"}.`,
       );
-      router.refresh();
-      setTimeout(() => setUploadToast(null), 4000);
     } catch (err) {
       setAiError(err instanceof Error ? err.message : "Could not tidy the graph.");
     } finally {
       setDecluttering(false);
     }
-  }, [decluttering, router]);
+  }, [decluttering]);
 
   const handleGhostDismiss = useCallback((ghostId: string) => {
     setGhosts((prev) => {
@@ -766,6 +962,13 @@ export function MindWorkspace({
     [handleSuggestAvenues],
   );
 
+  // Thoughts captured but not yet on the canvas — surfaced as a header badge
+  // so brain-dumps don't silently accumulate unseen.
+  const unpromotedCount = useMemo(() => {
+    const promoted = new Set(promotedMemoryIds);
+    return recentEntries.filter((e) => !promoted.has(e.id)).length;
+  }, [recentEntries, promotedMemoryIds]);
+
   const sheetOpen = activeSheet !== null;
   const suggestLabel = aiLoading
     ? "Thinking…"
@@ -871,6 +1074,7 @@ export function MindWorkspace({
               type="button"
               onClick={() => openSheet("insights")}
               aria-label={`Insights: ${insightCount}`}
+              title={`Insights (${insightCount})`}
               className="flex h-7 items-center gap-1 rounded-full border border-teal-400/40 bg-teal-950/30 px-2 text-[11px] font-medium text-teal-200 hover:bg-teal-950/50"
             >
               <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
@@ -886,7 +1090,8 @@ export function MindWorkspace({
           <button
             type="button"
             onClick={() => openSheet("search")}
-            aria-label="Search thoughts"
+            aria-label="Search thoughts, nodes, and documents"
+            title="Search"
             className="flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
           >
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
@@ -900,6 +1105,7 @@ export function MindWorkspace({
             type="button"
             onClick={() => openSheet("documents")}
             aria-label="Documents"
+            title="Documents"
             className="relative flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
           >
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
@@ -921,15 +1127,24 @@ export function MindWorkspace({
           <button
             type="button"
             onClick={() => openSheet("thoughts")}
-            aria-label="Recent thoughts"
+            aria-label={
+              unpromotedCount > 0
+                ? `Recent thoughts — ${unpromotedCount} not yet on the canvas`
+                : "Recent thoughts"
+            }
+            title={
+              unpromotedCount > 0
+                ? `${unpromotedCount} thought${unpromotedCount === 1 ? "" : "s"} not yet on the canvas`
+                : "Recent thoughts"
+            }
             className="relative flex h-7 w-7 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface text-neutral-400 hover:text-neutral-100"
           >
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
               <path d="M1 3h11M1 6.5h8M1 10h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
             </svg>
-            {recentEntries.length > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-neutral-600 text-[8px] font-bold leading-none text-white">
-                {Math.min(recentEntries.length, 9)}
+            {unpromotedCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-teal-600 text-[8px] font-bold leading-none text-white">
+                {Math.min(unpromotedCount, 9)}
               </span>
             )}
           </button>
@@ -1093,7 +1308,9 @@ export function MindWorkspace({
       <div
         onClick={closeSheet}
         className={[
-          "fixed inset-0 z-30 bg-black/50",
+          // Dim backdrop on mobile only; on desktop the docked panel sits
+          // beside a fully interactive canvas, so no backdrop.
+          "fixed inset-0 z-30 bg-black/50 lg:hidden",
           "transition-opacity duration-300",
           sheetOpen ? "opacity-100" : "opacity-0 pointer-events-none",
         ].join(" ")}
@@ -1104,7 +1321,24 @@ export function MindWorkspace({
         onClose={closeSheet}
         title="New thought"
       >
-        <ThoughtInputForm onSuccess={closeSheet} />
+        <ThoughtInputForm onSuccess={requestSuggestion} />
+      </BottomSheet>
+
+      <BottomSheet
+        open={activeSheet === "suggestion"}
+        onClose={handleSuggestionDismiss}
+        title="Where it belongs"
+      >
+        {captureReview && (
+          <SuggestionReview
+            state={captureReview}
+            onAccept={handleSuggestionAccept}
+            onDismiss={handleSuggestionDismiss}
+            onAddAsIs={handleSuggestionAddAsIs}
+            onRetry={() => requestSuggestion(captureReview.memoryId)}
+            addAsIsPending={addAsIsPending}
+          />
+        )}
       </BottomSheet>
 
       <BottomSheet
@@ -1115,6 +1349,7 @@ export function MindWorkspace({
         <RecentThoughtsList
           entries={recentEntries}
           promotedMemoryIds={promotedMemoryIds}
+          onSuggestPlacement={requestSuggestion}
         />
       </BottomSheet>
 
@@ -1125,8 +1360,9 @@ export function MindWorkspace({
       >
         <NodeDetail
           selectedNodeId={selectedNodeId}
-          nodes={initialNodes}
-          edges={initialEdges}
+          nodes={graphNodes}
+          edges={graphEdges}
+          onGraphDelta={applyGraphDelta}
           memoryTrails={memoryTrails}
           nodeDocumentSources={nodeDocumentSources}
           onSelectNode={(id) => {
@@ -1148,49 +1384,14 @@ export function MindWorkspace({
 
       <BottomSheet
         open={activeSheet === "search"}
-        onClose={() => {
-          setSearchQuery("");
-          closeSheet();
-        }}
-        title="Search thoughts"
+        onClose={closeSheet}
+        title="Search"
       >
-        <input
-          type="search"
-          autoFocus
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search titles and thoughts…"
-          className="block w-full rounded border border-canvas-border bg-canvas-bg px-3 py-2 text-sm text-neutral-100 outline-none focus:border-teal-300"
+        <SearchSheet
+          open={activeSheet === "search"}
+          onSelectNode={handleNodeSelect}
+          onSuggestPlacement={requestSuggestion}
         />
-        {searchResults.length > 0 ? (
-          <ul className="mt-3 space-y-2">
-            {searchResults.map((node) => (
-              <li key={node.id}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchQuery("");
-                    handleNodeSelect(node.id);
-                  }}
-                  className="block w-full rounded border border-canvas-border bg-canvas-bg p-3 text-left hover:border-teal-300/40"
-                >
-                  <p className="line-clamp-1 text-sm font-medium text-neutral-100">
-                    {node.title}
-                  </p>
-                  <p className="mt-1 line-clamp-2 text-xs text-neutral-500">
-                    {node.summary}
-                  </p>
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-3 text-xs text-neutral-500">
-            {searchQuery.trim()
-              ? "No matches."
-              : "Type to search your thoughts."}
-          </p>
-        )}
       </BottomSheet>
 
       <BottomSheet
@@ -1255,7 +1456,6 @@ export function MindWorkspace({
             setUploadToast(detail ? `${base}: ${detail}` : base);
             setActiveSheet("documents");
             router.refresh();
-            setTimeout(() => setUploadToast(null), 6000);
           }}
         />
       </BottomSheet>
@@ -1280,7 +1480,6 @@ export function MindWorkspace({
         focusNode={chatFocusNode}
         onClearFocus={() => setChatFocusNode(null)}
         starter={chatStarter}
-        onApplied={() => router.refresh()}
         onFocusNode={(id) => {
           setChatOpen(false);
           handleNodeSelect(id);

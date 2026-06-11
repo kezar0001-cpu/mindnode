@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import type {
   GraphNode,
   GraphEdge,
@@ -23,6 +22,7 @@ import {
   setPlanStatusAction,
 } from "@/lib/graph/actions";
 import { categoryColour } from "@/lib/graph/insights";
+import type { GraphDelta } from "@/lib/graph/delta";
 import { descendantsOf } from "@/lib/graph/view-model";
 
 const trailFormatter = new Intl.DateTimeFormat(undefined, {
@@ -106,6 +106,9 @@ type NodeDetailProps = {
   selectedNodeId: string | null;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  // Merges mutation results into the workspace graph state, so changes
+  // appear immediately without a route refresh.
+  onGraphDelta?: (delta: GraphDelta) => void;
   memoryTrails: MemoryTrailMap;
   nodeDocumentSources?: Record<string, NodeDocumentSource>;
   onSelectNode: (id: string) => void;
@@ -126,6 +129,7 @@ export function NodeDetail({
   selectedNodeId,
   nodes,
   edges,
+  onGraphDelta,
   memoryTrails,
   nodeDocumentSources,
   onSelectNode,
@@ -141,7 +145,6 @@ export function NodeDetail({
   collapsedNodeIds,
   onToggleBranchCollapsed,
 }: NodeDetailProps) {
-  const router = useRouter();
 
   // Connect form
   const [showConnectForm, setShowConnectForm] = useState(false);
@@ -248,7 +251,7 @@ export function NodeDetail({
       setShowConnectForm(false);
       setTargetId("");
       setRelType("related");
-      router.refresh();
+      if (result.edge) onGraphDelta?.({ upsertEdges: [result.edge] });
     });
   };
 
@@ -274,7 +277,7 @@ export function NodeDetail({
         return;
       }
       setEditMode(false);
-      router.refresh();
+      if (result.node) onGraphDelta?.({ upsertNodes: [result.node] });
     });
   };
 
@@ -282,7 +285,9 @@ export function NodeDetail({
   const handleSetPlanStatus = (status: PlanStatus) => {
     startPlanTransition(async () => {
       const result = await setPlanStatusAction(node.id, status);
-      if (result.success) router.refresh();
+      if (result.success && result.node) {
+        onGraphDelta?.({ upsertNodes: [result.node] });
+      }
     });
   };
 
@@ -301,7 +306,7 @@ export function NodeDetail({
         setDeleteConfirm(false);
         return;
       }
-      router.refresh();
+      onGraphDelta?.({ removeNodeIds: [node.id] });
       onNodeDeleted();
     });
   };
@@ -320,7 +325,7 @@ export function NodeDetail({
         setDeleteBranchConfirm(false);
         return;
       }
-      router.refresh();
+      onGraphDelta?.({ removeNodeIds: result.deletedNodeIds ?? [node.id] });
       onNodeDeleted();
     });
   };
@@ -343,7 +348,7 @@ export function NodeDetail({
       }
       setEditingEdgeId(null);
       setEditingRelType("");
-      router.refresh();
+      if (result.edge) onGraphDelta?.({ upsertEdges: [result.edge] });
     });
   };
 
@@ -362,7 +367,7 @@ export function NodeDetail({
         return;
       }
       setConfirmDeleteEdgeId(null);
-      router.refresh();
+      onGraphDelta?.({ removeEdgeIds: [edgeId] });
     });
   };
 

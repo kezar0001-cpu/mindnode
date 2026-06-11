@@ -82,7 +82,6 @@ export function GhostNodeComponent({ data, selected }: NodeProps<Node<GhostNodeD
               type="button"
               onClick={(e) => { e.stopPropagation(); if (!pinDisabled) data.onPin(); }}
               disabled={pinDisabled}
-              aria-disabled={pinDisabled}
               className={[
                 "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
                 pinDisabled

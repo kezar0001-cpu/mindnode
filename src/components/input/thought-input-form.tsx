@@ -8,7 +8,11 @@ import {
   initialCreateMemoryEntryState,
 } from "@/lib/memory/types";
 
-export function ThoughtInputForm({ onSuccess }: { onSuccess?: () => void }) {
+export function ThoughtInputForm({
+  onSuccess,
+}: {
+  onSuccess?: (memoryId: string) => void;
+}) {
   const [state, formAction, pending] = useActionState(
     createMemoryEntryAction,
     initialCreateMemoryEntryState,
@@ -18,7 +22,7 @@ export function ThoughtInputForm({ onSuccess }: { onSuccess?: () => void }) {
   useEffect(() => {
     if (state.status === "success") {
       formRef.current?.reset();
-      onSuccess?.();
+      onSuccess?.(state.memoryId);
     }
   }, [state, onSuccess]);
 

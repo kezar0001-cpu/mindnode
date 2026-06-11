@@ -31,6 +31,10 @@ type ChatBody = {
   selected_node_id?: string;
   conversation_id?: string;
   mode?: ChatMode;
+  // Retry of a turn whose user message is already persisted: regenerate the
+  // assistant response for the conversation's last user message instead of
+  // inserting a duplicate user turn.
+  retry?: boolean;
 };
 
 // Attach node/document ids to AI citations by matching their labels against
@@ -124,8 +128,9 @@ export async function POST(req: Request) {
     const supabase = await createSupabaseServerClient();
 
     const body = (await req.json().catch(() => ({}))) as ChatBody;
-    const message = (body.message ?? "").trim();
-    if (!message) {
+    const isRetry = body.retry === true;
+    let message = (body.message ?? "").trim();
+    if (!message && !isRetry) {
       return NextResponse.json(
         { ok: false, error: "Message is required." },
         { status: 400 },
@@ -134,6 +139,12 @@ export async function POST(req: Request) {
     if (message.length > 4000) {
       return NextResponse.json(
         { ok: false, error: "Message is too long." },
+        { status: 400 },
+      );
+    }
+    if (isRetry && !body.conversation_id) {
+      return NextResponse.json(
+        { ok: false, error: "conversation_id is required to retry." },
         { status: 400 },
       );
     }
@@ -157,6 +168,12 @@ export async function POST(req: Request) {
       if (!owned) conversationId = null;
       else previousSummary = owned.summary ?? null;
     }
+    if (isRetry && !conversationId) {
+      return NextResponse.json(
+        { ok: false, error: "Conversation not found." },
+        { status: 404 },
+      );
+    }
     if (!conversationId) {
       const { data: created, error } = await supabase
         .from("chat_conversations")
@@ -177,9 +194,48 @@ export async function POST(req: Request) {
 
     // Prior turns for continuity (oldest first, trimmed to the last 8).
     const priorMessages = await listMessages(supabase, user.id, conversationId);
-    const history = priorMessages
+
+    // On retry, regenerate for the conversation's last persisted user turn —
+    // it must not appear in history too, since it's passed as `message`.
+    let historySource = priorMessages;
+    if (isRetry) {
+      const lastUserIndex = priorMessages.map((m) => m.role).lastIndexOf("user");
+      if (lastUserIndex === -1) {
+        return NextResponse.json(
+          { ok: false, error: "Nothing to retry." },
+          { status: 400 },
+        );
+      }
+      message = priorMessages[lastUserIndex].content;
+      historySource = priorMessages.slice(0, lastUserIndex);
+    }
+    const history = historySource
       .slice(-8)
       .map((m) => ({ role: m.role, content: m.content }));
+
+    // Persist the user turn before generation, so a provider failure can
+    // never lose what the user typed. Retries skip this — their user turn
+    // is already stored.
+    if (!isRetry) {
+      const { error: userInsertError } = await supabase
+        .from("chat_messages")
+        .insert({
+          conversation_id: conversationId,
+          user_id: user.id,
+          role: "user",
+          content: message,
+          used_context_json: {
+            selected_node_id: body.selected_node_id ?? null,
+            mode,
+          },
+        });
+      if (userInsertError) {
+        return NextResponse.json(
+          { ok: false, error: "Could not save your message." },
+          { status: 500 },
+        );
+      }
+    }
 
     // Opportunistic embedding backfill: covers nodes/chunks created before
     // embeddings existed or while the provider was unavailable. Capped and
@@ -198,10 +254,19 @@ export async function POST(req: Request) {
       excludeConversationId: conversationId,
     });
 
-    // Generate the grounded answer.
+    // Generate the grounded answer. The user turn is already persisted, so a
+    // failure here is retryable without retyping or duplicating the message.
     const result = await generateChatResponse({ message, context, mode, history });
     if (!result.ok) {
-      return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: result.error,
+          conversation_id: conversationId,
+          user_message_persisted: true,
+        },
+        { status: 502 },
+      );
     }
     const { answer, citations, proposed_graph_changes } = result.response;
     const resolvedCitations = resolveCitations(citations, context);
@@ -229,15 +294,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // Persist the user turn, then the assistant turn.
-    await supabase.from("chat_messages").insert({
-      conversation_id: conversationId,
-      user_id: user.id,
-      role: "user",
-      content: message,
-      used_context_json: { selected_node_id: body.selected_node_id ?? null, mode },
-    });
-
+    // Persist the assistant turn (the user turn was stored before generation).
     const { data: assistantMsg } = await supabase
       .from("chat_messages")
       .insert({

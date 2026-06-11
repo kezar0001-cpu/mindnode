@@ -32,14 +32,18 @@ export async function createMemoryEntryAction(
   const user = await requireUser();
   const supabase = await createSupabaseServerClient();
 
-  const { error } = await supabase.from("memory_entries").insert({
-    user_id: user.id,
-    content,
-    source: "manual",
-    metadata: {},
-  });
+  const { data: created, error } = await supabase
+    .from("memory_entries")
+    .insert({
+      user_id: user.id,
+      content,
+      source: "manual",
+      metadata: {},
+    })
+    .select("id")
+    .single();
 
-  if (error) {
+  if (error || !created) {
     return {
       status: "error",
       error: "Could not save the thought. Please try again.",
@@ -47,5 +51,5 @@ export async function createMemoryEntryAction(
   }
 
   revalidatePath("/");
-  return { status: "success" };
+  return { status: "success", memoryId: created.id };
 }
