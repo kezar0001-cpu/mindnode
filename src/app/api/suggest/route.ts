@@ -5,7 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { embedText, toVectorLiteral } from "@/lib/ai/embeddings";
 import { generateCaptureSuggestion } from "@/lib/ai/suggest";
 import type { SuggestCandidate } from "@/lib/ai/suggest-prompts";
-import type { CaptureSuggestion } from "@/lib/ai/suggest-schema";
+import { sanitizeCaptureSuggestion } from "@/lib/ai/suggest-schema";
 import { findRelatedNodesByKeywords } from "@/lib/graph/keyword-link";
 
 export const dynamic = "force-dynamic";
@@ -59,34 +59,6 @@ async function findCandidates(
   }
 
   return Array.from(candidates.values()).slice(0, MAX_CANDIDATES);
-}
-
-// Enforce that node ids in the AI output refer to offered candidates: an
-// invalid update target downgrades the action to create_node, and edges to
-// unknown ids (or to the update target itself) are dropped.
-function sanitizeSuggestion(
-  suggestion: CaptureSuggestion,
-  candidateIds: Set<string>,
-): CaptureSuggestion {
-  let action = suggestion.action;
-  let targetNodeId = suggestion.target_node_id ?? null;
-  if (action === "update_node" && (!targetNodeId || !candidateIds.has(targetNodeId))) {
-    action = "create_node";
-    targetNodeId = null;
-  }
-  if (action === "create_node") {
-    targetNodeId = null;
-  }
-  const suggestedEdges = suggestion.suggested_edges
-    .filter((e) => candidateIds.has(e.target_node_id))
-    .filter((e) => e.target_node_id !== targetNodeId)
-    .slice(0, 3);
-  return {
-    ...suggestion,
-    action,
-    target_node_id: targetNodeId,
-    suggested_edges: suggestedEdges,
-  };
 }
 
 export async function POST(req: Request) {
@@ -150,7 +122,7 @@ export async function POST(req: Request) {
     }
 
     const candidateIds = new Set(candidates.map((c) => c.id));
-    const suggestion = sanitizeSuggestion(result.suggestion, candidateIds);
+    const suggestion = sanitizeCaptureSuggestion(result.suggestion, candidateIds);
 
     // Persist as a pending suggestion so applying it is reviewable + auditable.
     const { data: stored, error: storeError } = await supabase

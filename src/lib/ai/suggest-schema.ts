@@ -27,6 +27,36 @@ export const CaptureSuggestionSchema = z.object({
 export type CaptureSuggestion = z.infer<typeof CaptureSuggestionSchema>;
 export type CaptureSuggestedEdge = z.infer<typeof CaptureSuggestedEdgeSchema>;
 
+// Enforce that node ids in the AI output refer to offered candidates: an
+// invalid update target downgrades the action to create_node, and edges to
+// unknown ids (or to the update target itself) are dropped. Pure and
+// safety-critical — the model must never steer a write to a node it wasn't
+// shown — so it is unit-tested directly.
+export function sanitizeCaptureSuggestion(
+  suggestion: CaptureSuggestion,
+  candidateIds: Set<string>,
+): CaptureSuggestion {
+  let action = suggestion.action;
+  let targetNodeId = suggestion.target_node_id ?? null;
+  if (action === "update_node" && (!targetNodeId || !candidateIds.has(targetNodeId))) {
+    action = "create_node";
+    targetNodeId = null;
+  }
+  if (action === "create_node") {
+    targetNodeId = null;
+  }
+  const suggestedEdges = suggestion.suggested_edges
+    .filter((e) => candidateIds.has(e.target_node_id))
+    .filter((e) => e.target_node_id !== targetNodeId)
+    .slice(0, 3);
+  return {
+    ...suggestion,
+    action,
+    target_node_id: targetNodeId,
+    suggested_edges: suggestedEdges,
+  };
+}
+
 // What the client receives: the validated suggestion plus resolved titles for
 // every node id it references, so the review UI never shows a bare uuid.
 export type CaptureSuggestionResponse = {
