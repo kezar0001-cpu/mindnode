@@ -306,20 +306,20 @@ export function ChatPanel({
   return (
     <>
       {/* No dimming backdrop — the 3D network stays visible and alive behind
-          a translucent panel, so chat feels part of the same space. */}
+          a translucent panel, so chat feels part of the same space. Always
+          anchored to the bottom, on every screen size, for a predictable home. */}
       <div
         className={[
-          "fixed z-50 flex flex-col bg-canvas-surface/85 backdrop-blur-xl",
-          // Mobile: shorter bottom sheet so the network shows above it.
-          "bottom-0 left-0 right-0 h-[60vh] rounded-t-2xl border-t border-canvas-border/70",
-          // Desktop (lg+): right-docked panel, network visible to its left.
-          "lg:left-auto lg:right-0 lg:top-0 lg:bottom-0 lg:h-auto lg:w-[400px]",
-          "lg:rounded-t-none lg:rounded-l-2xl lg:border-t-0 lg:border-l lg:shadow-2xl lg:shadow-black/40",
+          "fixed inset-x-0 bottom-0 z-50 mx-auto flex h-[60vh] flex-col",
+          "bg-canvas-surface/90 backdrop-blur-xl",
+          "rounded-t-2xl border-t border-canvas-border/70 shadow-2xl shadow-black/40",
+          // Constrain and centre on wide screens so it doesn't stretch edge-to-edge.
+          "lg:max-w-2xl lg:rounded-t-3xl lg:border-x",
         ].join(" ")}
       >
         {/* Grab handle + header */}
         <div className="shrink-0 px-5 pt-3">
-          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-700 lg:hidden" />
+          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-700" />
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <p className="text-sm font-semibold text-neutral-200">Companion</p>

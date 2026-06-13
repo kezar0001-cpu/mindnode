@@ -267,11 +267,14 @@ export function Graph3D({
   // the focused neighbourhood and hubs get labels, so the scene stays legible.
   const nodeThreeObject = useCallback(
     (node: FGNode): Object3D => {
+      // Clear the sphere: three-force-graph sizes a node sphere with radius
+      // ≈ nodeRelSize * cbrt(val), so offset the label above that.
+      const radius = 5 * Math.cbrt(Math.max(node.val ?? 1, 1));
       if (node.id === PREVIEW_ID) {
         const sprite = new SpriteText(`✦ ${node.label}`);
         sprite.color = PREVIEW_COLOR;
-        sprite.textHeight = 5.5;
-        sprite.position.set(0, (node.val ?? 1) + 7, 0);
+        sprite.textHeight = 4.5;
+        sprite.position.set(0, radius + 6, 0);
         return sprite;
       }
       const isSelected = node.id === selectedNodeId;
@@ -285,9 +288,9 @@ export function Graph3D({
         return new Object3D();
       }
       const sprite = new SpriteText(node.label);
-      sprite.color = isSelected ? SELECTED_COLOR : "rgba(229,229,229,0.85)";
-      sprite.textHeight = isSelected ? 5 : 3.5;
-      sprite.position.set(0, (node.val ?? 1) + 6, 0);
+      sprite.color = isSelected ? SELECTED_COLOR : "rgba(229,229,229,0.82)";
+      sprite.textHeight = isSelected ? 4.5 : 3;
+      sprite.position.set(0, radius + (isSelected ? 6 : 5), 0);
       return sprite;
     },
     [selectedNodeId, dense, neighborIds],
@@ -350,12 +353,11 @@ export function Graph3D({
   );
 
   const handleBackgroundClick = useCallback(() => {
-    if (preview) {
-      onPreviewDismiss();
-      return;
-    }
-    onNodeSelect(null);
-  }, [preview, onPreviewDismiss, onNodeSelect]);
+    // Tapping empty space only discards an open capture preview. It must NOT
+    // clear the selection — an accidental off-node tap should never reset the
+    // user's idea flow. Deliberate reset lives on the Overview button.
+    if (preview) onPreviewDismiss();
+  }, [preview, onPreviewDismiss]);
 
   return (
     <div
@@ -403,8 +405,12 @@ export function Graph3D({
       {nodes.length > 0 && (
         <button
           type="button"
-          onClick={() => fgRef.current?.zoomToFit(800, 80)}
-          aria-label="Overview — see the whole network"
+          onClick={() => {
+            // Deliberate reset: clear the focus and re-frame the whole network.
+            onNodeSelect(null);
+            fgRef.current?.zoomToFit(800, 90);
+          }}
+          aria-label="Overview — clear focus and see the whole network"
           title="Overview"
           className="absolute right-4 top-16 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface/90 text-neutral-400 shadow-md backdrop-blur-sm transition-colors hover:text-neutral-100"
         >
