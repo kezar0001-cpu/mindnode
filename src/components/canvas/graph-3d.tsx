@@ -90,6 +90,9 @@ export function Graph3D({
     width: 0,
     height: 0,
   });
+  // "orbit" is the calm, Revit-like default (orbit a pivot, zoom, pan).
+  // "fly" is a first-person walkthrough (drag to look, W/A/S/D to move).
+  const [controlMode, setControlMode] = useState<"orbit" | "fly">("orbit");
 
   // Cache of force-graph node objects keyed by id. Reusing the same object
   // across renders keeps a node's simulated position; only genuinely new
@@ -219,29 +222,39 @@ export function Graph3D({
 
   // Ease the camera toward the selected node — staying wide enough to keep
   // its neighbours (the walkable paths) in view, rather than slamming onto a
-  // single point. Deselecting leaves the camera exactly where it is.
+  // single point. Deselecting leaves the camera exactly where it is. A
+  // just-added node may not have simulated coordinates yet, so poll a few
+  // frames until the layout places it, then fly.
   useEffect(() => {
     if (!selectedNodeId) return;
-    const fg = fgRef.current;
-    const node = nodeCache.current.get(selectedNodeId);
-    if (!fg || !node || node.x === undefined) return;
-    // Look at the node, but keep a comfortable standoff so context stays.
-    const cam = fg.camera().position;
-    const dx = cam.x - node.x;
-    const dy = cam.y - (node.y ?? 0);
-    const dz = cam.z - (node.z ?? 0);
-    const curDist = Math.hypot(dx, dy, dz) || 1;
-    const targetDist = 220;
-    const ratio = targetDist / curDist;
-    fg.cameraPosition(
-      {
-        x: node.x + dx * ratio,
-        y: (node.y ?? 0) + dy * ratio,
-        z: (node.z ?? 0) + dz * ratio,
-      },
-      { x: node.x, y: node.y ?? 0, z: node.z ?? 0 },
-      900,
-    );
+    let raf = 0;
+    let tries = 0;
+    const flyWhenReady = () => {
+      const fg = fgRef.current;
+      const node = nodeCache.current.get(selectedNodeId);
+      if (fg && node && node.x !== undefined) {
+        const cam = fg.camera().position;
+        const dx = cam.x - node.x;
+        const dy = cam.y - (node.y ?? 0);
+        const dz = cam.z - (node.z ?? 0);
+        const curDist = Math.hypot(dx, dy, dz) || 1;
+        const targetDist = 220;
+        const ratio = targetDist / curDist;
+        fg.cameraPosition(
+          {
+            x: node.x + dx * ratio,
+            y: (node.y ?? 0) + dy * ratio,
+            z: (node.z ?? 0) + dz * ratio,
+          },
+          { x: node.x, y: node.y ?? 0, z: node.z ?? 0 },
+          900,
+        );
+        return;
+      }
+      if (tries++ < 120) raf = requestAnimationFrame(flyWhenReady);
+    };
+    flyWhenReady();
+    return () => cancelAnimationFrame(raf);
   }, [selectedNodeId]);
 
   const nodeColor = useCallback(
@@ -368,6 +381,8 @@ export function Graph3D({
       {size.width > 0 && (
         <ForceGraph3D
           ref={fgRef}
+          key={controlMode}
+          controlType={controlMode}
           width={size.width}
           height={size.height}
           graphData={graphData}
@@ -403,27 +418,60 @@ export function Graph3D({
         />
       )}
       {nodes.length > 0 && (
-        <button
-          type="button"
-          onClick={() => {
-            // Deliberate reset: clear the focus and re-frame the whole network.
-            onNodeSelect(null);
-            fgRef.current?.zoomToFit(800, 90);
-          }}
-          aria-label="Overview — clear focus and see the whole network"
-          title="Overview"
-          className="absolute right-4 top-16 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface/90 text-neutral-400 shadow-md backdrop-blur-sm transition-colors hover:text-neutral-100"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <path
-              d="M5 1H1v4M9 1h4v4M5 13H1V9M9 13h4V9"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
+        <div className="absolute right-4 top-16 z-10 flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              // Deliberate reset: clear the focus and re-frame the whole network.
+              onNodeSelect(null);
+              fgRef.current?.zoomToFit(800, 90);
+            }}
+            aria-label="Overview — clear focus and see the whole network"
+            title="Overview"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-canvas-border bg-canvas-surface/90 text-neutral-400 shadow-md backdrop-blur-sm transition-colors hover:text-neutral-100"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path
+                d="M5 1H1v4M9 1h4v4M5 13H1V9M9 13h4V9"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setControlMode((m) => (m === "orbit" ? "fly" : "orbit"))
+            }
+            aria-label={
+              controlMode === "orbit"
+                ? "Enter walkthrough mode"
+                : "Exit walkthrough mode"
+            }
+            title={controlMode === "orbit" ? "Walkthrough" : "Orbit view"}
+            className={[
+              "flex h-9 w-9 items-center justify-center rounded-full border shadow-md backdrop-blur-sm transition-colors",
+              controlMode === "fly"
+                ? "border-teal-400/50 bg-teal-950/40 text-teal-200"
+                : "border-canvas-border bg-canvas-surface/90 text-neutral-400 hover:text-neutral-100",
+            ].join(" ")}
+          >
+            {/* footprints / walk glyph */}
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+              <path
+                d="M5 2.5c.9 0 1.4 1 1.4 2.2 0 1-.3 1.8-.3 2.6 0 .6.2 1 .2 1.6 0 .9-.5 1.4-1.3 1.4S3.8 11.8 3.8 11c0-.6.2-1 .2-1.7 0-.8-.3-1.6-.3-2.6C3.7 3.5 4.2 2.5 5 2.5ZM10.2 4.8c.8 0 1.3.9 1.3 2 0 .9-.3 1.6-.3 2.4 0 .6.2.9.2 1.5 0 .8-.5 1.3-1.2 1.3S9 11.5 9 10.7c0-.6.2-.9.2-1.5 0-.8-.3-1.5-.3-2.4 0-1.1.5-2 1.3-2Z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
+        </div>
+      )}
+      {controlMode === "fly" && (
+        <div className="pointer-events-none absolute left-1/2 top-16 z-10 -translate-x-1/2 rounded-full border border-teal-400/30 bg-canvas-surface/90 px-3 py-1.5 text-[11px] text-teal-100 shadow-md backdrop-blur-sm">
+          Walkthrough · drag to look, W/A/S/D to move
+        </div>
       )}
       {nodes.length === 0 && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">

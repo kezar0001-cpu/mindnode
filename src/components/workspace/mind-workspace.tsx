@@ -426,6 +426,13 @@ export function MindWorkspace({
     });
     setCaptureReview(null);
     setActiveSheet(null);
+    // Take the user straight to the thought they just added/updated: select
+    // it so the camera flies in and its card opens.
+    if (result.node) {
+      setSelectedNodeId(result.node.id);
+      setCardDismissed(false);
+      setActiveRootNodeId(result.node.id);
+    }
     setUploadToast(
       result.action === "update_node"
         ? "Updated the existing thought."
