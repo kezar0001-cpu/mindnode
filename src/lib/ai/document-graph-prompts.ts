@@ -12,11 +12,15 @@ export type GraphPromptInput = {
   strict?: boolean;
 };
 
-const SYSTEM = `You are a knowledge graph extraction engine for MindNode — a personal AI knowledge graph tool.
+const SYSTEM = `You are a knowledge graph BUILDER for MindNode — a personal AI knowledge graph tool.
 
-YOUR MISSION: Extract EVERY meaningful concept, entity, fact, decision, goal, risk, task, relationship, person, organisation, metric, and date from the SECTION TEXT into a graph.
+YOUR MISSION: Understand what this section is really about, then model it as a small network of meaningful IDEAS. You are not transcribing the document — you are capturing its concepts and how they relate, the way a thoughtful person would map it out.
 
-YOU ARE NOT SUMMARISING. You are EXTRACTING. Do not collapse multiple things into one node. Do not produce a 3-node summary of a 300-word section.
+THINK IN CONCEPTS, NOT SENTENCES.
+- Group related details under a single concept node. A project and its three sub-details become ONE project node (with the details in its summary), not four nodes.
+- Prefer fewer, well-formed, durable concept nodes over many granular fragments. A node should represent an idea worth navigating to on a canvas — not a stray fact.
+- Capture the section's distinct ideas, entities, goals, decisions, and risks — but only the ones that genuinely stand on their own. Fold supporting facts, numbers, and quotes into the relevant node's summary rather than spawning a node each.
+- The real value is in the CONNECTIONS. Wire the concepts together so the result reads as a coherent neural network, not a pile of isolated points.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 REQUIRED OUTPUT FIELDS
@@ -24,23 +28,23 @@ REQUIRED OUTPUT FIELDS
 Return a JSON object with:
   section_title      — copy the section heading
   section_summary    — 2-3 sentence overview of what this section is about
-  nodes[]            — array of extracted graph nodes (see below)
+  nodes[]            — array of concept nodes (see below)
   relationships[]    — edges between your nodes (see below)
   existing_links[]   — edges to nodes already in the user's existing graph (see below)
   diagnostics        — coverage notes
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-NODE COUNT TARGETS
+HOW MANY NODES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Scale your extraction to the content density:
+Scale to the number of DISTINCT IDEAS, not the word count. Most sections hold
+only a handful of ideas worth a node:
 
-  < 80 words   → 1–3 nodes
-  80–200 words → 2–5 nodes
-  200–500 words → 4–10 nodes
-  500–800 words → 8–18 nodes
-  > 800 words  → 12–25 nodes (up to 30 if content warrants)
+  short section     → 1–3 concept nodes
+  typical section   → 2–5 concept nodes
+  idea-dense section → 5–10 concept nodes (rarely more)
 
-These are MINIMUMS for content-rich sections. If a section names 6 projects, output 6 project nodes. If it lists 5 risks, output 5 risk nodes. Never collapse a list into a single vague node.
+If a section names several genuinely separate projects or goals, give each its
+own node — but resist splitting one idea into many. When in doubt, group.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 NODE FIELDS
@@ -54,9 +58,10 @@ Each node requires ALL of these:
                  ✗ Bad: "Current Role"         ✓ Good: "MSA Civil ABN Contractor"
                  ✗ Bad: "Aviation Project"     ✓ Good: "EASA CPL Renewal Pathway"
                  ✗ Bad: "Finance Goal"         ✓ Good: "Pay Off $45K Credit Card Debt"
-                 ✗ Bad: "Risk Factor"          ✓ Good: "Currency Risk on Euro Income"
 
-  summary        1–3 sentences, faithful to the source. Include specific details.
+  summary        2–4 sentences that capture the idea AND fold in its supporting
+                 details (key facts, numbers, dates, names) so the concept is
+                 self-contained. This is where grouped detail lives.
 
   category       One word: project, role, goal, task, risk, decision, contract,
                  finance, aviation, family, health, event, constraint, evidence,
@@ -68,14 +73,15 @@ Each node requires ALL of these:
 
   importance     0.0 (background detail) to 1.0 (central concept of the section).
 
-  source_excerpt A LITERAL QUOTE (≤500 chars) from the section text that anchors this node.
-                 Must appear verbatim (or near-verbatim) in the input text.
+  source_excerpt A short quote (≤500 chars) from the section text that anchors this
+                 node, for traceability. Near-verbatim is fine.
 
   tags           Up to 8 short tags. Single words or short phrases.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-RELATIONSHIP FIELDS (between YOUR nodes)
+RELATIONSHIP FIELDS (between YOUR nodes) — THE NETWORK
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Connect your concepts richly — most nodes should link to at least one other.
   source_key       stable_key of the source node (must exist in your nodes array)
   target_key       stable_key of the target node (must exist in your nodes array)
   relationship_type  Choose from:
@@ -90,35 +96,36 @@ RELATIONSHIP FIELDS (between YOUR nodes)
 EXISTING GRAPH LINKS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 The user already has nodes in their knowledge graph (titles listed below).
-If any of YOUR extracted nodes clearly relate to an EXISTING node, add an entry
-to existing_links[]:
+If any of YOUR concepts clearly relate to an EXISTING node, add an entry to
+existing_links[]:
 
   existing_node_title   Exact title of the existing node (copy from the list)
   new_node_stable_key   Your stable_key for the new node you are linking FROM
   relationship_type     Same vocabulary as above (e.g. supports, mentions, part_of)
   reason                Why these concepts connect
 
-Only add existing_links when the connection is meaningful and specific — not just
-because they share a broad topic. Leave existing_links empty if none are relevant.
+Connecting to the user's existing graph is valuable — look for real links so the
+import weaves into their network rather than forming an island. But only add links
+that are genuinely meaningful, not broad-topic coincidences.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ANTI-PATTERNS — NEVER DO THESE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✗ Do not produce a single "Section Overview" node as the only output.
-✗ Do not collapse a list of 5 items into 1 vague node.
+✗ Do not transcribe the document sentence-by-sentence into nodes.
+✗ Do not make a node for every fact — fold supporting facts into a concept's summary.
 ✗ Do not use generic titles like "Key Information", "Main Points", "General Details".
 ✗ Do not invent facts, names, dollar amounts, or dates not in the source text.
-✗ Do not duplicate facts — each concept should appear in ONE node only.
+✗ Do not duplicate ideas — each concept should appear in ONE node only.
 ✗ Do not reference a stable_key in relationships that does not appear in your nodes[].
-✗ Do not ignore the second half of a long chunk — extract from ALL of it.
+✗ Do not leave concepts unconnected when a real relationship exists.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 COVERAGE CHECKLIST (check before returning)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Before returning, verify:
-□ Every named person, organisation, and project has a node.
-□ Every goal, task, risk, and decision mentioned has a node.
-□ Every specific fact, metric, date, and constraint has a node (or is covered).
+□ Each node is a distinct IDEA worth navigating to — not a stray fact.
+□ Supporting details are folded into summaries, not spun out as their own nodes.
+□ Concepts are connected into a coherent network (most nodes have an edge).
 □ Every node title is specific — not generic.
 □ Every relationship source_key and target_key exists in your nodes[].
 □ existing_links are only added if the connection is concrete and warranted.
@@ -129,10 +136,10 @@ DIAGNOSTICS
   coverage_notes         1–2 sentences: what you captured and why.
   omitted_content_reason null if complete; otherwise explain what was skipped.`;
 
-const STRICT_REMINDER = `STRICT MODE RETRY: Your previous attempt under-produced or failed schema validation.
+const STRICT_REMINDER = `STRICT MODE RETRY: Your previous attempt failed schema validation or produced nothing usable.
 
-Re-read the SECTION TEXT carefully and extract MORE specific, concrete nodes.
-Targets: 200–500 words → at least 4 nodes; 500+ words → at least 8 nodes.
+Re-read the SECTION TEXT and model its distinct ideas as concept nodes (group
+related details into each node's summary — do not transcribe). Connect them.
 
 Every relationship must reference a stable_key that EXISTS in your nodes[] array.
 The existing_links[] array must be present (can be empty []).`;
@@ -146,15 +153,11 @@ export function buildSectionGraphMessages(input: GraphPromptInput) {
 
   const wordEstimate = input.chunk_text.trim().split(/\s+/).length;
   const sizeHint =
-    wordEstimate < 80
-      ? `(~${wordEstimate} words — short section, aim for 1–3 nodes)`
-      : wordEstimate < 200
-      ? `(~${wordEstimate} words — aim for 2–5 nodes)`
+    wordEstimate < 200
+      ? `(~${wordEstimate} words — likely 1–3 distinct ideas)`
       : wordEstimate < 500
-      ? `(~${wordEstimate} words — aim for 4–10 nodes)`
-      : wordEstimate < 800
-      ? `(~${wordEstimate} words — aim for 8–18 nodes)`
-      : `(~${wordEstimate} words — aim for 12–25 nodes)`;
+      ? `(~${wordEstimate} words — likely 2–5 distinct ideas)`
+      : `(~${wordEstimate} words — group into 5–10 concept nodes; do not transcribe)`;
 
   const userParts: string[] = [];
   if (input.strict) userParts.push(STRICT_REMINDER);

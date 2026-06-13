@@ -41,6 +41,7 @@ import {
   createNodeFromMemoryAction,
   pinGhostSuggestionAction,
   declutterGraphAction,
+  deleteNodeAction,
 } from "@/lib/graph/actions";
 import {
   applyCaptureSuggestionAction,
@@ -361,6 +362,47 @@ export function MindWorkspace({
   const [chatOpen, setChatOpen] = useState(false);
   const [chatFocusNode, setChatFocusNode] = useState<{ id: string; title: string } | null>(null);
   const [chatStarter, setChatStarter] = useState<{ prompt: string; nonce: number } | null>(null);
+  // Proactive companion: the AI's reaction to an on-canvas change, surfaced as
+  // a live chat message and (when chat is closed) a small dismissible peek.
+  const [companion, setCompanion] = useState<{
+    content: string;
+    followUps: string[];
+    nonce: number;
+  } | null>(null);
+  const [companionUnread, setCompanionUnread] = useState(false);
+
+  // Ask the proactive companion to react to an on-canvas change. Best-effort:
+  // the companion is a delight, never a blocker, so failures are swallowed.
+  const triggerCompanion = useCallback(
+    async (event: string, nodeId?: string) => {
+      if (!USE_3D) return;
+      try {
+        const res = await fetch("/api/chat/proactive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ event, selected_node_id: nodeId }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.ok || !json.answer) return;
+        setCompanion({
+          content: json.answer,
+          followUps: Array.isArray(json.follow_up_topics)
+            ? json.follow_up_topics
+            : [],
+          nonce: Date.now(),
+        });
+        setCompanionUnread(true);
+      } catch {
+        // Non-critical — ignore.
+      }
+    },
+    [],
+  );
+
+  // Opening the chat clears the unread companion peek.
+  useEffect(() => {
+    if (chatOpen) setCompanionUnread(false);
+  }, [chatOpen]);
 
   const openChat = useCallback(
     (focus?: { id: string; title: string } | null, prompt?: string) => {
@@ -425,12 +467,25 @@ export function MindWorkspace({
     });
     setCaptureReview(null);
     setActiveSheet(null);
+    // Take the user straight to the thought they just added/updated: select
+    // it so the camera flies in and its card opens.
+    if (result.node) {
+      setSelectedNodeId(result.node.id);
+      setCardDismissed(false);
+      setActiveRootNodeId(result.node.id);
+      void triggerCompanion(
+        result.action === "update_node"
+          ? `updated the thought "${result.node.title}"`
+          : `added the thought "${result.node.title}"`,
+        result.node.id,
+      );
+    }
     setUploadToast(
       result.action === "update_node"
         ? "Updated the existing thought."
         : "Added to your canvas.",
     );
-  }, [captureReview, applyGraphDelta]);
+  }, [captureReview, applyGraphDelta, triggerCompanion]);
 
   const handleSuggestionDismiss = useCallback(() => {
     if (captureReview && (captureReview.phase === "ready" || captureReview.phase === "applying")) {
@@ -512,6 +567,29 @@ export function MindWorkspace({
     }
     return out;
   }, [graphEdges, graphNodes, selectedNodeId]);
+
+  // Delete a thought straight from the card: remove it from the canvas
+  // (edges + memory links go too, server-side) and clear the selection.
+  const handleDeleteThought = useCallback(
+    async (id: string) => {
+      const title = graphNodes.find((n) => n.id === id)?.title;
+      const result = await deleteNodeAction(id);
+      if (!result.success) {
+        setUploadToast(result.error ?? "Could not delete the thought.");
+        return;
+      }
+      applyGraphDelta({ removeNodeIds: [id] });
+      setSelectedNodeId(null);
+      setCardDismissed(false);
+      setUploadToast("Thought deleted.");
+      void triggerCompanion(
+        title
+          ? `deleted the thought "${title}" from the canvas`
+          : "deleted a thought from the canvas",
+      );
+    },
+    [applyGraphDelta, graphNodes, triggerCompanion],
+  );
 
   // Insights derived from the in-memory graph.
   const insights = useMemo(
@@ -1117,13 +1195,14 @@ export function MindWorkspace({
           MindNode
         </p>
         <div className="flex items-center gap-1.5">
-          {/* Chat companion — speech bubble icon */}
+          {/* Chat companion — speech bubble icon, with an unread dot when the
+              proactive companion has something new. */}
           <button
             type="button"
             onClick={() => openChat(null)}
             aria-label="Open companion chat"
             title="Companion chat"
-            className="flex h-7 w-7 items-center justify-center rounded-full border border-teal-400/40 bg-teal-950/30 text-teal-200 transition-colors hover:bg-teal-900/50"
+            className="relative flex h-7 w-7 items-center justify-center rounded-full border border-teal-400/40 bg-teal-950/30 text-teal-200 transition-colors hover:bg-teal-900/50"
           >
             <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
               <path
@@ -1133,6 +1212,9 @@ export function MindWorkspace({
                 strokeLinejoin="round"
               />
             </svg>
+            {companionUnread && !chatOpen && (
+              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-canvas-bg bg-teal-400" />
+            )}
           </button>
 
           {!USE_3D ? (
@@ -1400,47 +1482,77 @@ export function MindWorkspace({
           className="fixed inset-x-0 z-20 mx-auto w-[min(560px,calc(100%-2rem))] px-2"
           style={{ bottom: "max(20px, calc(env(safe-area-inset-bottom) + 8px))" }}
         >
-          {/* One calm surface at a time: the capture preview, the selected
-              thought's card, or the composer. */}
-          {previewNode ? (
-            <>
-              <div className="mb-2 rounded-xl border border-sky-400/40 bg-canvas-surface/90 px-4 py-3 text-sm shadow-lg shadow-black/40 backdrop-blur-md">
-                <p className="text-neutral-200">
-                  Tap the glowing{" "}
-                  <span className="font-medium text-sky-300">
-                    {previewNode.title}
-                  </span>{" "}
-                  to keep it · tap empty space to discard.
+          {/* Proactive companion peek — the AI reacting to a change. Tap to
+              open the full chat; stays out of the way otherwise. */}
+          {companion && companionUnread && !chatOpen && (
+            <div className="mb-2 rounded-xl border border-teal-400/40 bg-canvas-surface/95 px-4 py-3 shadow-lg shadow-black/40 backdrop-blur-md">
+              <div className="flex items-start justify-between gap-3">
+                <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-teal-300">
+                  <span className="h-1.5 w-1.5 rounded-full bg-teal-400" />
+                  Companion
                 </p>
-                {captureReview?.phase === "ready" && (
-                  <p className="mt-1 text-xs text-neutral-400">
-                    {captureReview.data.suggestion.explanation}
-                  </p>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setCompanionUnread(false)}
+                  aria-label="Dismiss"
+                  className="-m-1 p-1 text-neutral-500 hover:text-neutral-200"
+                >
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                    <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                  </svg>
+                </button>
               </div>
-              <QuickCapture
-                onSuccess={requestSuggestion}
-                busy={captureReview?.phase === "loading"}
-              />
-            </>
-          ) : selectedNode && !sheetOpen && !cardDismissed ? (
-            <ThoughtCard
-              node={selectedNode}
-              neighbours={selectedNeighbours}
-              trail={memoryTrails[selectedNode.id] ?? []}
-              onHop={handleNodeSelect}
-              onAskAI={() =>
-                openChat({ id: selectedNode.id, title: selectedNode.title })
-              }
-              onEdit={() => setActiveSheet("detail")}
-              onClose={() => setCardDismissed(true)}
-            />
-          ) : (
-            <QuickCapture
-              onSuccess={requestSuggestion}
-              busy={captureReview?.phase === "loading"}
-            />
+              <p className="mt-1 line-clamp-3 text-sm leading-snug text-neutral-200">
+                {companion.content}
+              </p>
+              <button
+                type="button"
+                onClick={() => openChat(chatFocusNode)}
+                className="mt-2 text-xs font-medium text-teal-300 hover:text-teal-200"
+              >
+                Open chat →
+              </button>
+            </div>
           )}
+          {/* The capture preview or the selected thought's card stacks ABOVE
+              the composer — the "What's on your mind?" box stays available at
+              all times. */}
+          {previewNode && (
+            <div className="mb-2 rounded-xl border border-sky-400/40 bg-canvas-surface/90 px-4 py-3 text-sm shadow-lg shadow-black/40 backdrop-blur-md">
+              <p className="text-neutral-200">
+                Tap the glowing{" "}
+                <span className="font-medium text-sky-300">
+                  {previewNode.title}
+                </span>{" "}
+                to keep it · tap empty space to discard.
+              </p>
+              {captureReview?.phase === "ready" && (
+                <p className="mt-1 text-xs text-neutral-400">
+                  {captureReview.data.suggestion.explanation}
+                </p>
+              )}
+            </div>
+          )}
+          {!previewNode && selectedNode && !sheetOpen && !cardDismissed && (
+            <div className="mb-2">
+              <ThoughtCard
+                node={selectedNode}
+                neighbours={selectedNeighbours}
+                trail={memoryTrails[selectedNode.id] ?? []}
+                onHop={handleNodeSelect}
+                onAskAI={() =>
+                  openChat({ id: selectedNode.id, title: selectedNode.title })
+                }
+                onEdit={() => setActiveSheet("detail")}
+                onDelete={() => handleDeleteThought(selectedNode.id)}
+                onClose={() => setCardDismissed(true)}
+              />
+            </div>
+          )}
+          <QuickCapture
+            onSuccess={requestSuggestion}
+            busy={captureReview?.phase === "loading"}
+          />
         </div>
       ) : (
         <button
@@ -1687,6 +1799,7 @@ export function MindWorkspace({
           setChatOpen(false);
           handleNodeSelect(id);
         }}
+        incoming={companion}
       />
     </div>
   );

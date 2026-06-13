@@ -43,6 +43,14 @@ type ChatPanelProps = {
   onApplied?: () => void;
   // Tapping a resolved citation closes the chat and focuses that node.
   onFocusNode?: (nodeId: string) => void;
+  // A proactive companion message pushed in from an on-canvas change. When
+  // its nonce changes and the panel is open, it's appended to the thread.
+  incoming?: {
+    content: string;
+    followUps: string[];
+    suggestion?: Suggestion;
+    nonce: number;
+  } | null;
 };
 
 let localIdSeq = 0;
@@ -59,27 +67,28 @@ export function ChatPanel({
   starter,
   onApplied,
   onFocusNode,
+  incoming,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hydrated, setHydrated] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const appliedNonce = useRef<number | null>(null);
 
-  // Hydrate the latest conversation the first time the panel opens.
+  // Re-hydrate the latest conversation each time the panel opens, so any
+  // proactive companion messages added while it was closed are shown.
   useEffect(() => {
-    if (!open || hydrated) return;
+    if (!open) return;
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch("/api/chat", { method: "GET" });
         const json = await res.json();
         if (cancelled || !json.ok) {
-          setHydrated(true);
           return;
         }
         const pendingByMsg = new Map<string, Suggestion>();
@@ -118,15 +127,38 @@ export function ChatPanel({
         }
         setMessages(loaded);
         setConversationId(json.conversation_id ?? null);
-        setHydrated(true);
+        // A proactive nudge that arrived before this open is now loaded from
+        // the server, so don't also append it live.
+        if (incoming) appliedNonce.current = incoming.nonce;
       } catch {
-        setHydrated(true);
+        // Keep whatever is on screen.
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, hydrated]);
+    // Re-runs on each open; `incoming` intentionally excluded to avoid refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Append a proactive companion message live when it arrives and the panel is
+  // open. When closed, it's marked handled and will load via re-hydrate on open.
+  useEffect(() => {
+    if (!incoming || appliedNonce.current === incoming.nonce) return;
+    if (!open) return;
+    appliedNonce.current = incoming.nonce;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: localId(),
+        role: "assistant",
+        content: incoming.content,
+        citations: [],
+        suggestion: incoming.suggestion,
+        followUps: incoming.followUps,
+      },
+    ]);
+  }, [incoming, open]);
 
   // Prefill the input when opened from a node action.
   useEffect(() => {
@@ -306,20 +338,20 @@ export function ChatPanel({
   return (
     <>
       {/* No dimming backdrop — the 3D network stays visible and alive behind
-          a translucent panel, so chat feels part of the same space. */}
+          a translucent panel, so chat feels part of the same space. Always
+          anchored to the bottom, on every screen size, for a predictable home. */}
       <div
         className={[
-          "fixed z-50 flex flex-col bg-canvas-surface/85 backdrop-blur-xl",
-          // Mobile: shorter bottom sheet so the network shows above it.
-          "bottom-0 left-0 right-0 h-[60vh] rounded-t-2xl border-t border-canvas-border/70",
-          // Desktop (lg+): right-docked panel, network visible to its left.
-          "lg:left-auto lg:right-0 lg:top-0 lg:bottom-0 lg:h-auto lg:w-[400px]",
-          "lg:rounded-t-none lg:rounded-l-2xl lg:border-t-0 lg:border-l lg:shadow-2xl lg:shadow-black/40",
+          "fixed inset-x-0 bottom-0 z-50 mx-auto flex h-[60vh] flex-col",
+          "bg-canvas-surface/90 backdrop-blur-xl",
+          "rounded-t-2xl border-t border-canvas-border/70 shadow-2xl shadow-black/40",
+          // Constrain and centre on wide screens so it doesn't stretch edge-to-edge.
+          "lg:max-w-2xl lg:rounded-t-3xl lg:border-x",
         ].join(" ")}
       >
         {/* Grab handle + header */}
         <div className="shrink-0 px-5 pt-3">
-          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-700 lg:hidden" />
+          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-neutral-700" />
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <p className="text-sm font-semibold text-neutral-200">Companion</p>

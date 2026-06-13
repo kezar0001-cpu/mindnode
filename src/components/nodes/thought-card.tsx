@@ -34,6 +34,7 @@ export function ThoughtCard({
   onHop,
   onAskAI,
   onEdit,
+  onDelete,
   onClose,
 }: {
   node: GraphNode;
@@ -42,10 +43,12 @@ export function ThoughtCard({
   onHop: (id: string) => void;
   onAskAI: () => void;
   onEdit: () => void;
+  onDelete: () => void;
   onClose: () => void;
 }) {
   const colour = categoryColour(node.category || "general");
   const [showTrail, setShowTrail] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
     <div className="max-h-[56vh] overflow-y-auto rounded-2xl border border-canvas-border/80 bg-canvas-surface/95 p-4 shadow-lg shadow-black/40 backdrop-blur-md">
@@ -154,22 +157,59 @@ export function ThoughtCard({
         </div>
       )}
 
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onAskAI}
-          className="flex-1 rounded-full bg-teal-600/90 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-500"
-        >
-          Ask AI about this
-        </button>
-        <button
-          type="button"
-          onClick={onEdit}
-          className="rounded-full px-3 py-2 text-xs text-neutral-500 transition-colors hover:text-neutral-300"
-        >
-          Edit
-        </button>
-      </div>
+      {confirmDelete ? (
+        <div className="mt-3 flex items-center gap-2">
+          <p className="flex-1 text-xs text-red-300">Delete this thought?</p>
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(false)}
+            className="rounded-full px-3 py-2 text-xs text-neutral-400 hover:text-neutral-200"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="rounded-full bg-red-900/70 px-4 py-2 text-xs font-medium text-red-200 hover:bg-red-900"
+          >
+            Delete
+          </button>
+        </div>
+      ) : (
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onAskAI}
+            className="flex-1 rounded-full bg-teal-600/90 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-teal-500"
+          >
+            Ask AI about this
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="rounded-full px-3 py-2 text-xs text-neutral-500 transition-colors hover:text-neutral-300"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            aria-label="Delete thought"
+            title="Delete thought"
+            className="rounded-full px-2.5 py-2 text-neutral-500 transition-colors hover:text-red-400"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path
+                d="M2 3.5h10M5 3.5V2.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1M3 3.5l.6 8a1 1 0 0 0 1 .9h4.8a1 1 0 0 0 1-.9l.6-8"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

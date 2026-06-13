@@ -70,6 +70,15 @@ export type PriorConversation = {
   summary: string;
 };
 
+// A compact bird's-eye view of the ENTIRE graph — every node and edge in a
+// terse form — so the chat always reasons over the whole neural network, not
+// just the retrieved slice. Capped to stay within a sane token budget.
+export type GraphMap = {
+  nodeLines: string[];
+  edgeLines: string[];
+  truncated: boolean;
+};
+
 export type RetrievedContext = {
   selectedNode: RetrievedNode | null;
   neighborNodes: RetrievedNode[];
@@ -78,6 +87,7 @@ export type RetrievedContext = {
   chunks: RetrievedChunk[];
   recentThoughts: string[];
   priorConversations: PriorConversation[];
+  fullMap: GraphMap;
   totalNodes: number;
   totalDocuments: number;
   retrievalMode: "hybrid" | "keyword";
@@ -87,6 +97,10 @@ const MAX_RELEVANT_NODES = 14;
 const MAX_CHUNKS = 16;
 const MAX_NEIGHBORS = 12;
 const MAX_PRIOR_CONVERSATIONS = 5;
+// Full-network map caps — large enough for a personal graph, bounded so the
+// prompt never blows the token budget on a big graph.
+const MAX_MAP_NODES = 250;
+const MAX_MAP_EDGES = 400;
 const CHUNK_SCAN_LIMIT = 400;
 const VECTOR_MATCH_COUNT = 24;
 // Hybrid blend: vector similarity is the primary signal; keyword overlap
@@ -217,32 +231,51 @@ export async function retrieveChatContext(
     relevantNodes = [];
   }
 
-  // 4. Edges among the in-context nodes, rendered with node titles.
+  // 4. Edges — fetched once, then used for BOTH the detailed in-context edges
+  // and the compact full-network map.
   const contextNodeIds = new Set<string>([
     ...(selectedNode ? [selectedNode.id] : []),
     ...neighborNodes.map((n) => n.id),
     ...relevantNodes.map((n) => n.id),
   ]);
   const edges: RetrievedEdge[] = [];
-  if (contextNodeIds.size > 0) {
-    const { data: edgeRows } = await supabase
-      .from("edges")
-      .select("source_node_id, target_node_id, relationship_type")
-      .eq("user_id", userId);
-    for (const e of edgeRows ?? []) {
-      if (contextNodeIds.has(e.source_node_id) && contextNodeIds.has(e.target_node_id)) {
-        const src = nodeById.get(e.source_node_id);
-        const tgt = nodeById.get(e.target_node_id);
-        if (src && tgt) {
-          edges.push({
-            source_title: src.title,
-            target_title: tgt.title,
-            relationship_type: e.relationship_type,
-          });
-        }
-      }
+  const allEdgeLines: string[] = [];
+  let edgesTruncated = false;
+  const { data: edgeRows } = await supabase
+    .from("edges")
+    .select("source_node_id, target_node_id, relationship_type")
+    .eq("user_id", userId);
+  for (const e of edgeRows ?? []) {
+    const src = nodeById.get(e.source_node_id);
+    const tgt = nodeById.get(e.target_node_id);
+    if (!src || !tgt) continue;
+    // Full-network map line (capped).
+    if (allEdgeLines.length < MAX_MAP_EDGES) {
+      allEdgeLines.push(`${src.title} --[${e.relationship_type}]--> ${tgt.title}`);
+    } else {
+      edgesTruncated = true;
+    }
+    // Detailed edges among the nodes already in deep context.
+    if (contextNodeIds.has(e.source_node_id) && contextNodeIds.has(e.target_node_id)) {
+      edges.push({
+        source_title: src.title,
+        target_title: tgt.title,
+        relationship_type: e.relationship_type,
+      });
     }
   }
+
+  // Compact list of every node (title + category) for the full-network map.
+  const nodeLines: string[] = [];
+  for (const n of nodes) {
+    if (nodeLines.length >= MAX_MAP_NODES) break;
+    nodeLines.push(`${n.title} [${n.category || "general"}]`);
+  }
+  const fullMap: GraphMap = {
+    nodeLines,
+    edgeLines: allEdgeLines,
+    truncated: edgesTruncated || nodes.length > MAX_MAP_NODES,
+  };
 
   // 5. Source chunks — vector search first, keyword scan as complement.
   const { data: docRows } = await supabase
@@ -375,6 +408,7 @@ export async function retrieveChatContext(
     chunks,
     recentThoughts,
     priorConversations,
+    fullMap,
     totalNodes: nodes.length,
     totalDocuments,
     retrievalMode,
