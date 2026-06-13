@@ -43,6 +43,14 @@ type ChatPanelProps = {
   onApplied?: () => void;
   // Tapping a resolved citation closes the chat and focuses that node.
   onFocusNode?: (nodeId: string) => void;
+  // A proactive companion message pushed in from an on-canvas change. When
+  // its nonce changes and the panel is open, it's appended to the thread.
+  incoming?: {
+    content: string;
+    followUps: string[];
+    suggestion?: Suggestion;
+    nonce: number;
+  } | null;
 };
 
 let localIdSeq = 0;
@@ -59,27 +67,28 @@ export function ChatPanel({
   starter,
   onApplied,
   onFocusNode,
+  incoming,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hydrated, setHydrated] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const appliedNonce = useRef<number | null>(null);
 
-  // Hydrate the latest conversation the first time the panel opens.
+  // Re-hydrate the latest conversation each time the panel opens, so any
+  // proactive companion messages added while it was closed are shown.
   useEffect(() => {
-    if (!open || hydrated) return;
+    if (!open) return;
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch("/api/chat", { method: "GET" });
         const json = await res.json();
         if (cancelled || !json.ok) {
-          setHydrated(true);
           return;
         }
         const pendingByMsg = new Map<string, Suggestion>();
@@ -118,15 +127,38 @@ export function ChatPanel({
         }
         setMessages(loaded);
         setConversationId(json.conversation_id ?? null);
-        setHydrated(true);
+        // A proactive nudge that arrived before this open is now loaded from
+        // the server, so don't also append it live.
+        if (incoming) appliedNonce.current = incoming.nonce;
       } catch {
-        setHydrated(true);
+        // Keep whatever is on screen.
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, hydrated]);
+    // Re-runs on each open; `incoming` intentionally excluded to avoid refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Append a proactive companion message live when it arrives and the panel is
+  // open. When closed, it's marked handled and will load via re-hydrate on open.
+  useEffect(() => {
+    if (!incoming || appliedNonce.current === incoming.nonce) return;
+    if (!open) return;
+    appliedNonce.current = incoming.nonce;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: localId(),
+        role: "assistant",
+        content: incoming.content,
+        citations: [],
+        suggestion: incoming.suggestion,
+        followUps: incoming.followUps,
+      },
+    ]);
+  }, [incoming, open]);
 
   // Prefill the input when opened from a node action.
   useEffect(() => {

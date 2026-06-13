@@ -154,6 +154,23 @@ function buildContextBlock(ctx: RetrievedContext, mode: ChatMode): string {
   return parts.join("\n\n");
 }
 
+// A proactive turn: the user just changed their graph on the canvas. The
+// companion reacts as an active guide — acknowledging the change, connecting
+// it across the whole network, and naming a specific avenue worth exploring.
+export function buildProactiveMessages(input: {
+  event: string;
+  context: RetrievedContext;
+}): ChatMessage[] {
+  const contextBlock = buildContextBlock(input.context, "global");
+  return [
+    { role: "system", content: SYSTEM },
+    {
+      role: "user",
+      content: `${contextBlock}\n\n---\n\nSYSTEM EVENT (this is NOT a message the user typed — it is something they just did on the canvas):\n${input.event}\n\nAs their companion and active guide, respond in 1-2 short, warm sentences: acknowledge what changed, point out how it connects to the rest of their network above, and name ONE specific, unexplored avenue worth pursuing. Do not greet or pad. Populate follow_up_topics with 2-3 concrete threads to explore next. Propose graph_changes only if genuinely valuable. Respond with the JSON schema described in the system prompt.`,
+    },
+  ];
+}
+
 export function buildChatMessages(input: {
   message: string;
   context: RetrievedContext;
