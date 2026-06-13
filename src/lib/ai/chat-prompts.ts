@@ -65,6 +65,24 @@ function buildContextBlock(ctx: RetrievedContext, mode: ChatMode): string {
     return parts.join("\n\n");
   }
 
+  // The whole network up front, so every answer reasons over the full graph —
+  // connecting dots across distant nodes and spotting unexplored avenues —
+  // before zooming into the retrieved detail below.
+  if (ctx.fullMap.nodeLines.length > 0) {
+    const mapParts = [
+      `FULL NETWORK MAP — every node in the user's graph (${ctx.totalNodes} total${
+        ctx.fullMap.truncated ? ", truncated" : ""
+      }). Use this to understand the whole network, connect distant ideas, and surface avenues they haven't explored:`,
+      ctx.fullMap.nodeLines.join("\n"),
+    ];
+    if (ctx.fullMap.edgeLines.length > 0) {
+      mapParts.push(
+        `CONNECTIONS (whole network):\n${ctx.fullMap.edgeLines.join("\n")}`,
+      );
+    }
+    parts.push(mapParts.join("\n\n"));
+  }
+
   if (ctx.selectedNode) {
     parts.push(
       `FOCUSED NODE — the user is asking about this node specifically:\n${describeNode(
