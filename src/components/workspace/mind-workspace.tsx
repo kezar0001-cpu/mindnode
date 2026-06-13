@@ -291,6 +291,9 @@ export function MindWorkspace({
   }, []);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  // In 3D, closing the ThoughtCard dismisses just the card — the node stays
+  // selected/lit and the camera stays put, so you keep your place.
+  const [cardDismissed, setCardDismissed] = useState(false);
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
   const [uploadToast, setUploadToast] = useState<string | null>(null);
 
@@ -591,6 +594,7 @@ export function MindWorkspace({
 
   const handleNodeSelect = useCallback((id: string | null) => {
     setSelectedNodeId(id);
+    setCardDismissed(false);
     setSelectedGhostId(null);
     setActiveGhostPathIds([]);
     setActiveRootNodeId(id);
@@ -1419,7 +1423,7 @@ export function MindWorkspace({
                 busy={captureReview?.phase === "loading"}
               />
             </>
-          ) : selectedNode && !sheetOpen ? (
+          ) : selectedNode && !sheetOpen && !cardDismissed ? (
             <ThoughtCard
               node={selectedNode}
               neighbours={selectedNeighbours}
@@ -1429,7 +1433,7 @@ export function MindWorkspace({
                 openChat({ id: selectedNode.id, title: selectedNode.title })
               }
               onEdit={() => setActiveSheet("detail")}
-              onClose={() => handleNodeSelect(null)}
+              onClose={() => setCardDismissed(true)}
             />
           ) : (
             <QuickCapture

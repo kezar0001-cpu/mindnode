@@ -96,6 +96,8 @@ export function Graph3D({
   // ids get fresh objects (which enter at the centre and "pop" into their
   // cluster). Rebuilding these every render would reset the layout.
   const nodeCache = useRef<Map<string, FGNode>>(new Map());
+  // Frame the whole network once, after the first layout settles.
+  const didInitialFit = useRef(false);
 
   // Node connectivity → render hubs slightly larger.
   const degrees = useMemo<Map<string, number>>(() => {
@@ -185,8 +187,24 @@ export function Graph3D({
     return () => ro.disconnect();
   }, []);
 
-  // Direct neighbours of the selected node — used for label gating and the
-  // subtle particle "energy" flow along focused links.
+  // Spread the layout into a readable structure rather than a tight ball:
+  // stronger repulsion, a comfortable link distance, and a centring pull so
+  // the whole network stays framed. Configured once the instance exists.
+  useEffect(() => {
+    if (size.width === 0) return;
+    const fg = fgRef.current;
+    if (!fg) return;
+    const charge = fg.d3Force("charge") as
+      | { strength: (s: number) => unknown; distanceMax: (d: number) => unknown }
+      | undefined;
+    charge?.strength(-220);
+    charge?.distanceMax(600);
+    const link = fg.d3Force("link") as
+      | { distance: (d: number) => unknown }
+      | undefined;
+    link?.distance(70);
+    fg.d3ReheatSimulation();
+  }, [size.width, nodes.length]);
   const neighborIds = useMemo<Set<string>>(() => {
     const s = new Set<string>();
     if (!selectedNodeId) return s;
@@ -199,20 +217,30 @@ export function Graph3D({
 
   const dense = nodes.length > LABEL_DENSITY_THRESHOLD;
 
-  // Fly the camera to the selected node — close enough to feel like
-  // stepping into its neighbourhood, with the lit neighbours in view.
+  // Ease the camera toward the selected node — staying wide enough to keep
+  // its neighbours (the walkable paths) in view, rather than slamming onto a
+  // single point. Deselecting leaves the camera exactly where it is.
   useEffect(() => {
     if (!selectedNodeId) return;
     const fg = fgRef.current;
     const node = nodeCache.current.get(selectedNodeId);
     if (!fg || !node || node.x === undefined) return;
-    const distance = 110;
-    const hypot = Math.hypot(node.x, node.y ?? 0, node.z ?? 0) || 1;
-    const ratio = 1 + distance / hypot;
+    // Look at the node, but keep a comfortable standoff so context stays.
+    const cam = fg.camera().position;
+    const dx = cam.x - node.x;
+    const dy = cam.y - (node.y ?? 0);
+    const dz = cam.z - (node.z ?? 0);
+    const curDist = Math.hypot(dx, dy, dz) || 1;
+    const targetDist = 220;
+    const ratio = targetDist / curDist;
     fg.cameraPosition(
-      { x: node.x * ratio, y: (node.y ?? 0) * ratio, z: (node.z ?? 0) * ratio },
+      {
+        x: node.x + dx * ratio,
+        y: (node.y ?? 0) + dy * ratio,
+        z: (node.z ?? 0) + dz * ratio,
+      },
       { x: node.x, y: node.y ?? 0, z: node.z ?? 0 },
-      800,
+      900,
     );
   }, [selectedNodeId]);
 
@@ -345,8 +373,9 @@ export function Graph3D({
           showNavInfo={false}
           nodeColor={nodeColor}
           nodeVal={nodeVal}
+          nodeRelSize={5}
           nodeLabel={(node: FGNode) => node.label}
-          nodeOpacity={0.9}
+          nodeOpacity={0.92}
           nodeResolution={16}
           nodeThreeObject={nodeThreeObject}
           nodeThreeObjectExtend
@@ -359,8 +388,16 @@ export function Graph3D({
           linkLabel={(link: FGLink) => link.label}
           onNodeClick={handleNodeClick}
           onBackgroundClick={handleBackgroundClick}
-          cooldownTicks={120}
-          warmupTicks={20}
+          onEngineStop={() => {
+            // Frame the whole network once the first layout settles, so the
+            // user always opens onto a structured, fully-visible map.
+            if (!didInitialFit.current && nodes.length > 0) {
+              fgRef.current?.zoomToFit(700, 90);
+              didInitialFit.current = true;
+            }
+          }}
+          cooldownTicks={200}
+          warmupTicks={40}
         />
       )}
       {nodes.length > 0 && (
