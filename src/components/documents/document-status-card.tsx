@@ -99,8 +99,8 @@ export function DocumentStatusCard({
       const count = result.nodesDeleted ?? 0;
       setDeleteResult(
         count === 0
-          ? "Graph removed."
-          : `Removed ${count} node${count === 1 ? "" : "s"} from graph.`,
+          ? "Document removed."
+          : `Document removed (${count} node${count === 1 ? "" : "s"}).`,
       );
     });
   };
@@ -198,7 +198,7 @@ export function DocumentStatusCard({
                   onClick={handleDelete}
                   className="text-[11px] text-red-500/60 hover:text-red-400"
                 >
-                  Delete generated graph
+                  Delete document &amp; its thoughts
                 </button>
               )}
             </div>

@@ -41,6 +41,7 @@ import {
   createNodeFromMemoryAction,
   pinGhostSuggestionAction,
   declutterGraphAction,
+  deleteNodeAction,
 } from "@/lib/graph/actions";
 import {
   applyCaptureSuggestionAction,
@@ -512,6 +513,23 @@ export function MindWorkspace({
     }
     return out;
   }, [graphEdges, graphNodes, selectedNodeId]);
+
+  // Delete a thought straight from the card: remove it from the canvas
+  // (edges + memory links go too, server-side) and clear the selection.
+  const handleDeleteThought = useCallback(
+    async (id: string) => {
+      const result = await deleteNodeAction(id);
+      if (!result.success) {
+        setUploadToast(result.error ?? "Could not delete the thought.");
+        return;
+      }
+      applyGraphDelta({ removeNodeIds: [id] });
+      setSelectedNodeId(null);
+      setCardDismissed(false);
+      setUploadToast("Thought deleted.");
+    },
+    [applyGraphDelta],
+  );
 
   // Insights derived from the in-memory graph.
   const insights = useMemo(
@@ -1400,47 +1418,45 @@ export function MindWorkspace({
           className="fixed inset-x-0 z-20 mx-auto w-[min(560px,calc(100%-2rem))] px-2"
           style={{ bottom: "max(20px, calc(env(safe-area-inset-bottom) + 8px))" }}
         >
-          {/* One calm surface at a time: the capture preview, the selected
-              thought's card, or the composer. */}
-          {previewNode ? (
-            <>
-              <div className="mb-2 rounded-xl border border-sky-400/40 bg-canvas-surface/90 px-4 py-3 text-sm shadow-lg shadow-black/40 backdrop-blur-md">
-                <p className="text-neutral-200">
-                  Tap the glowing{" "}
-                  <span className="font-medium text-sky-300">
-                    {previewNode.title}
-                  </span>{" "}
-                  to keep it · tap empty space to discard.
+          {/* The capture preview or the selected thought's card stacks ABOVE
+              the composer — the "What's on your mind?" box stays available at
+              all times. */}
+          {previewNode && (
+            <div className="mb-2 rounded-xl border border-sky-400/40 bg-canvas-surface/90 px-4 py-3 text-sm shadow-lg shadow-black/40 backdrop-blur-md">
+              <p className="text-neutral-200">
+                Tap the glowing{" "}
+                <span className="font-medium text-sky-300">
+                  {previewNode.title}
+                </span>{" "}
+                to keep it · tap empty space to discard.
+              </p>
+              {captureReview?.phase === "ready" && (
+                <p className="mt-1 text-xs text-neutral-400">
+                  {captureReview.data.suggestion.explanation}
                 </p>
-                {captureReview?.phase === "ready" && (
-                  <p className="mt-1 text-xs text-neutral-400">
-                    {captureReview.data.suggestion.explanation}
-                  </p>
-                )}
-              </div>
-              <QuickCapture
-                onSuccess={requestSuggestion}
-                busy={captureReview?.phase === "loading"}
-              />
-            </>
-          ) : selectedNode && !sheetOpen && !cardDismissed ? (
-            <ThoughtCard
-              node={selectedNode}
-              neighbours={selectedNeighbours}
-              trail={memoryTrails[selectedNode.id] ?? []}
-              onHop={handleNodeSelect}
-              onAskAI={() =>
-                openChat({ id: selectedNode.id, title: selectedNode.title })
-              }
-              onEdit={() => setActiveSheet("detail")}
-              onClose={() => setCardDismissed(true)}
-            />
-          ) : (
-            <QuickCapture
-              onSuccess={requestSuggestion}
-              busy={captureReview?.phase === "loading"}
-            />
+              )}
+            </div>
           )}
+          {!previewNode && selectedNode && !sheetOpen && !cardDismissed && (
+            <div className="mb-2">
+              <ThoughtCard
+                node={selectedNode}
+                neighbours={selectedNeighbours}
+                trail={memoryTrails[selectedNode.id] ?? []}
+                onHop={handleNodeSelect}
+                onAskAI={() =>
+                  openChat({ id: selectedNode.id, title: selectedNode.title })
+                }
+                onEdit={() => setActiveSheet("detail")}
+                onDelete={() => handleDeleteThought(selectedNode.id)}
+                onClose={() => setCardDismissed(true)}
+              />
+            </div>
+          )}
+          <QuickCapture
+            onSuccess={requestSuggestion}
+            busy={captureReview?.phase === "loading"}
+          />
         </div>
       ) : (
         <button
